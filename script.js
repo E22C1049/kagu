@@ -1,61 +1,54 @@
-// script.js（ダブルクリック選択版）
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-let scene, camera, renderer, cube, controls;
-let outline; // 選択時のアウトライン
-let currentHeight = 1; // 箱の高さ（底面y=0に合わせる用）
+let scene, camera, renderer, controls;
+let cube = null;        
+let outline = null;     
+let currentHeight = 1;  
 
-// 選択 & ドラッグ用
+const statusEl = document.getElementById('status');
+const doneBtn = document.getElementById('done');
+const deleteBtn = document.getElementById('delete');
+
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
-const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // XZ 平面(y=0)
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // XZ平面(y=0)
 const planeIntersectPoint = new THREE.Vector3();
 const dragOffset = new THREE.Vector3();
 let isSelected = false;
 let isDragging = false;
 
-const statusEl = document.getElementById('status');
-const doneBtn = document.getElementById('done');
-
 init();
 animate();
 
 function init() {
-    // シーン
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf4f6f8);
 
-    // カメラ
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
     camera.position.set(2.5, 2, 3);
 
-    // レンダラ
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     document.body.appendChild(renderer.domElement);
 
-    // 操作
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0.5, 0);
 
-    // ライト
     const dirLight = new THREE.DirectionalLight(0xffffff, 1);
     dirLight.position.set(5, 8, 5);
     scene.add(dirLight);
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-    // ガイド
     scene.add(new THREE.GridHelper(10, 20));
     scene.add(new THREE.AxesHelper(1.5));
 
-    // 初期ボックス
+    // 初期の箱
     createBox(1, 1, 1);
 
-    // UIイベント
     document.getElementById('generate').addEventListener('click', () => {
         const w = parseFloat(document.getElementById('width').value);
         const h = parseFloat(document.getElementById('height').value);
@@ -65,22 +58,33 @@ function init() {
             return;
         }
         createBox(w, h, d);
-        clearSelection(); // 新規生成で選択解除
+        clearSelection(); 
     });
 
     doneBtn.addEventListener('click', () => {
-        clearSelection(); // 移動モード終了
+        clearSelection(); 
     });
 
-    // 入力イベント（ダブルクリックで選択）
+    deleteBtn.addEventListener('click', () => {
+        deleteSelected(); 
+    });
+
+    // 入力（ダブルクリックで選択）
     renderer.domElement.addEventListener('dblclick', onDoubleClick);
 
-    // ドラッグ用（選択中のみ有効）
+    // ドラッグ（選択中のみ）
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
 
     window.addEventListener('resize', onWindowResize);
+
+    window.addEventListener('keydown', (e) => {
+        if ((e.key === 'Delete' || e.key === 'Backspace') && isSelected) {
+            e.preventDefault();
+            deleteSelected();
+        }
+    });
 }
 
 function createBox(width, height, depth) {
@@ -97,15 +101,12 @@ function createBox(width, height, depth) {
         outline = null;
     }
 
+    // 新規作成
     const geometry = new THREE.BoxGeometry(width, height, depth);
-    const material = new THREE.MeshStandardMaterial({
-        color: 0x2194ce,
-        roughness: 0.5,
-        metalness: 0.0
-    });
+    const material = new THREE.MeshStandardMaterial({ color: 0x2194ce, roughness: 0.5, metalness: 0.0 });
     cube = new THREE.Mesh(geometry, material);
     currentHeight = height;
-    cube.position.set(0, height / 2, 0); // 底面を地面に
+    cube.position.set(0, height / 2, 0); 
     scene.add(cube);
 
     fitCameraToObject(camera, cube, 1.4);
@@ -138,33 +139,28 @@ function setPointerFromEvent(event) {
     pointer.set(x, y);
 }
 
-// 変更点①：ダブルクリックで選択
+//ダブルクリック
 function onDoubleClick(event) {
     setPointerFromEvent(event);
     raycaster.setFromCamera(pointer, camera);
     const hits = cube ? raycaster.intersectObject(cube, false) : [];
     if (hits.length > 0) {
-        // オブジェクト上をダブルクリック → 選択
         selectCube();
     }
-    // ダブルクリックで背景を叩いても何もしない（解除は「完了」ボタン）
 }
 
-// 変更点②：ドラッグ開始は「選択中」かつ「オブジェクト上を押下した場合のみ」
 function onPointerDown(event) {
     if (!isSelected) return;
 
     setPointerFromEvent(event);
     raycaster.setFromCamera(pointer, camera);
-
     const hits = cube ? raycaster.intersectObject(cube, false) : [];
-    if (hits.length === 0) return; // オブジェクト外を押してもドラッグ開始しない
+    if (hits.length === 0) return; 
 
-    // XZ平面との交点からオフセットを算出
     if (raycaster.ray.intersectPlane(dragPlane, planeIntersectPoint)) {
         dragOffset.copy(planeIntersectPoint).sub(cube.position);
         isDragging = true;
-        controls.enabled = false; // カメラ操作を止める
+        controls.enabled = false; 
     }
 }
 
@@ -176,10 +172,6 @@ function onPointerMove(event) {
 
     if (raycaster.ray.intersectPlane(dragPlane, planeIntersectPoint)) {
         const target = new THREE.Vector3().copy(planeIntersectPoint).sub(dragOffset);
-
-        // （任意）グリッドスナップ：0.05刻み
-        // target.x = Math.round(target.x / 0.05) * 0.05;
-        // target.z = Math.round(target.z / 0.05) * 0.05;
 
         cube.position.set(target.x, currentHeight / 2, target.z);
         if (outline) outline.position.copy(cube.position);
@@ -193,21 +185,22 @@ function onPointerUp() {
     }
 }
 
+// 選択状態
 function selectCube() {
     if (!cube) return;
-    if (isSelected) return; // 既に選択中なら何もしない
+    if (isSelected) return;
+
     isSelected = true;
     statusEl.textContent = '選択中（ドラッグで移動）';
     doneBtn.disabled = false;
+    deleteBtn.disabled = false;
 
-    // 視覚的な選択表現（アウトライン）
     const edges = new THREE.EdgesGeometry(cube.geometry);
     const mat = new THREE.LineBasicMaterial({ color: 0x0077ff });
     outline = new THREE.LineSegments(edges, mat);
     outline.position.copy(cube.position);
     scene.add(outline);
 
-    // マテリアル強調
     cube.material.emissive = new THREE.Color(0x113355);
     cube.material.emissiveIntensity = 0.15;
 }
@@ -218,6 +211,7 @@ function clearSelection() {
     controls.enabled = true;
     statusEl.textContent = 'ダブルクリックで選択';
     doneBtn.disabled = true;
+    deleteBtn.disabled = true;
 
     if (outline) {
         scene.remove(outline);
@@ -228,6 +222,30 @@ function clearSelection() {
     if (cube && cube.material) {
         cube.material.emissiveIntensity = 0.0;
     }
+}
+
+//物体の削除
+function deleteSelected() {
+    if (!isSelected || !cube) return;
+
+    if (outline) {
+        scene.remove(outline);
+        outline.geometry.dispose();
+        outline.material.dispose();
+        outline = null;
+    }
+
+    scene.remove(cube);
+    cube.geometry.dispose();
+    cube.material.dispose();
+    cube = null;
+
+    statusEl.textContent = '削除済み';
+    isSelected = false;
+    isDragging = false;
+    doneBtn.disabled = true;
+    deleteBtn.disabled = true;
+    controls.enabled = true;
 }
 
 function onWindowResize() {
