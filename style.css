@@ -41,6 +41,7 @@ body {
     border: 1px solid #ccc;
 }
 
+/* ボタン */
 button {
     padding: 8px 16px;
     font-size: 14px;
@@ -63,6 +64,7 @@ button:disabled {
     cursor: default;
 }
 
+/* 解析結果折りたたみ見出し */
 .collapsible-header {
     cursor: pointer;
     background-color: #e0e0e0;
@@ -77,6 +79,7 @@ button:disabled {
     background-color: #d0d0d0;
 }
 
+/* 折りたたみコンテナ */
 #result-container {
     overflow-y: auto;
     max-height: 0;
@@ -112,6 +115,7 @@ button:disabled {
     overflow: hidden;
 }
 
+/* 折りたたみコンテナ共通 */
 .collapsible-header {
     cursor: pointer;
     background-color: #e0e0e0;
@@ -149,6 +153,7 @@ button:disabled {
     padding: 10px;
 }
 
+/* アップロード画像は最大幅100%、高さ自動 */
 #preview {
     max-width: 100%;
     height: auto;
