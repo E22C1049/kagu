@@ -16,9 +16,10 @@
   </script>
 
     <script type="module">
-        import * as THREE from 'three'; 
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; 
+        import * as THREE from 'three'; // インポートマップのおかげで 'three' で読み込める
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // 'three/addons/' のマッピングを使用
 
+        // THREE と OrbitControls をグローバルスコープに公開
         window.THREE = THREE;
         window.OrbitControls = OrbitControls;
     </script>
@@ -53,6 +54,7 @@
 
         <div class="right-pane">
             <h2>3D表示</h2>
+            <!-- 3D表示ツールバー（追加） -->
             <div class="placebar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:.5rem 0;">
                 <label>幅x <input type="number" id="boxW" value="1" step="0.1" style="width:80px"></label>
                 <label>高y <input type="number" id="boxH" value="1" step="0.1" style="width:80px"></label>
