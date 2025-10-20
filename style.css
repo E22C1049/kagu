@@ -1,23 +1,55 @@
 body {
-  margin: 0;
-  font-family: sans-serif;
+    margin: 0;
+    font-family: sans-serif;
 }
 
 #controls {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 10px;
-  border-radius: 5px;
-  z-index: 10;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(255, 255, 255, 0.92);
+    padding: 12px;
+    border-radius: 8px;
+    z-index: 10;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .08);
+    backdrop-filter: blur(4px);
 }
 
 label {
-  display: block;
-  margin: 5px 0 2px;
+    display: block;
+    margin: 6px 0 2px;
+    font-size: 14px;
+}
+
+#controls input {
+    width: 120px;
+}
+
+#controls button {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    background: #f4f6f8;
+    cursor: pointer;
+}
+
+#controls button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+#status {
+    margin-top: 6px;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #eef6ff;
+    border: 1px solid #cfe5ff;
+    color: #1155cc;
+    display: inline-block;
 }
 
 canvas {
-  display: block;
+    display: block;
 }
