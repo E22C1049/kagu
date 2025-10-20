@@ -1,6 +1,3 @@
-// script.js — Roboflow解析→3D表示 ＋ 物体配置（生成/ダブルクリック選択/ドラッグ/完了/削除）
-// 単位設定: unitScale=0.1（UIで1入力 → ワールド0.1）
-
 let accessToken = null;
 let latestJson = null;
 
@@ -21,26 +18,22 @@ function requestAccessToken() {
     }).requestAccessToken();
 }
 
-/* =========================
-   Placement（配置コントローラ）
-   ========================= */
 class Placement {
     constructor({ scene, camera, renderer, controls = null, ui, unitScale = 1 }) {
         this.scene = scene;
         this.camera = camera;
         this.renderer = renderer;
-        this.controls = controls;      // OrbitControls（任意）
+        this.controls = controls;     
         this.ui = ui || {};
-        this.unit = unitScale;         // ★ UI 1 あたりのワールド長さ（例: 0.1）
+        this.unit = unitScale;         
 
-        this.objects = [];      // 家具メッシュ
-        this.selected = null;   // 選択中メッシュ
-        this.outline = null;    // 選択アウトライン
+        this.objects = [];      
+        this.selected = null;   
+        this.outline = null;    
         this.isDragging = false;
         this.enabled = true;
-        this.snap = 0;          // 例: 0.05 で5cmスナップ
+        this.snap = 0;          
 
-        // レイキャスト & ドラッグ平面（y=0 のXZ）
         this.ray = new THREE.Raycaster();
         this.ndc = new THREE.Vector2();
         this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -49,7 +42,7 @@ class Placement {
 
         this._bindUI();
         this._bindPointer();
-        this._updateStatus('未選択');
+        this._updateStatus('ダブルクリックで選択');
         if (this.ui.doneBtn) this.ui.doneBtn.disabled = true;
         if (this.ui.delBtn) this.ui.delBtn.disabled = true;
     }
@@ -102,7 +95,6 @@ class Placement {
         if (this.doneBtn) this.doneBtn.addEventListener('click', () => this._clearSelection());
         if (this.delBtn) this.delBtn.addEventListener('click', () => this._deleteSelected());
 
-        // キーボード削除
         this._onKeyDown = (e) => {
             if (!this.enabled) return;
             if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
@@ -116,7 +108,6 @@ class Placement {
     _bindPointer() {
         const el = this.renderer.domElement;
 
-        // ダブルクリックで選択
         this._onDblClick = (ev) => {
             if (!this.enabled) return;
             this._setNDC(ev);
@@ -125,7 +116,6 @@ class Placement {
             if (hits.length > 0) this._select(hits[0].object);
         };
 
-        // 選択中 & 物体上でのみドラッグ開始
         this._onDown = (ev) => {
             if (!this.enabled || !this.selected) return;
             this._setNDC(ev);
@@ -149,7 +139,6 @@ class Placement {
                     target.x = Math.round(target.x / this.snap) * this.snap;
                     target.z = Math.round(target.z / this.snap) * this.snap;
                 }
-                // 底面は常に y=0
                 const H = this._getHeight(this.selected);
                 this.selected.position.set(target.x, H / 2, target.z);
                 if (this.outline) this.outline.position.copy(this.selected.position);
@@ -187,7 +176,6 @@ class Placement {
     }
 
     addBox({ width = 1, height = 1, depth = 1, color = 0x2194ce, position = null }) {
-        // ★ UIの数値にunitを乗算（1 → 0.1）
         const W = width * this.unit;
         const H = height * this.unit;
         const D = depth * this.unit;
@@ -200,7 +188,6 @@ class Placement {
         this.scene.add(box);
         this.objects.push(box);
 
-        // 新規生成時は未選択（誤操作防止）
         this._clearSelection();
     }
 
@@ -235,7 +222,7 @@ class Placement {
         this.isDragging = false;
         if (this.controls) this.controls.enabled = true;
 
-        this._updateStatus('未選択');
+        this._updateStatus('ダブルクリックで選択');
         if (this.doneBtn) this.doneBtn.disabled = true;
         if (this.delBtn) this.delBtn.disabled = true;
     }
@@ -262,9 +249,6 @@ class Placement {
     }
 }
 
-/* =======================
-   既存UI初期化とAPI呼び出し
-   ======================= */
 document.addEventListener("DOMContentLoaded", () => {
     const uploadHeader = document.getElementById("upload-header");
     const uploadContainer = document.getElementById("upload-container");
@@ -277,8 +261,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadBtn = document.getElementById("loadBtn");
     const filenameInput = document.getElementById("filenameInput");
     const fileSelect = document.getElementById("fileSelect");
-
-    // 配置ツールUI
     const wEl = document.getElementById('boxW');
     const hEl = document.getElementById('boxH');
     const dEl = document.getElementById('boxD');
@@ -406,7 +388,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // Drive ファイル削除
     const deleteBtn = document.getElementById("deleteBtn");
     deleteBtn.addEventListener("click", () => {
         const fileId = fileSelect.value;
@@ -441,16 +422,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
-/* ==============
-   3D描画本体
-   ============== */
 function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
     const placementUI = opts.placementUI || null;
 
     const container = document.getElementById("three-container");
     container.innerHTML = "";
 
-    // レンダラ
+
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     const W = container.clientWidth;
     const H = container.clientHeight || 600;
@@ -458,7 +436,6 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
     renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
 
-    // シーン & カメラ & コントロール
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf2f2f2);
 
@@ -473,7 +450,6 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
     controls.screenSpacePanning = false;
     controls.maxPolarAngle = Math.PI / 2;
 
-    // ライト & 床
     const dir = new THREE.DirectionalLight(0xffffff, 1);
     dir.position.set(6, 10, 4);
     dir.castShadow = true;
@@ -488,8 +464,7 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // 解析結果を薄い箱で描画（平面的）
-    const pxToWorld = 0.01; // 1px → 0.01（任意）
+    const pxToWorld = 0.01; 
     const classColors = {
         "left side": 0xffffff, "right side": 0xffffff, "top side": 0xffffff, "under side": 0xffffff,
         wall: 0xaaaaaa, door: 0x8b4513, "glass door": 0x87cefa,
@@ -510,7 +485,6 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
         scene.add(mesh);
     });
 
-    // ★ 配置コントローラ起動（unitScale=0.1 = UIの1→0.1）
     const placement = new Placement({
         scene, camera, renderer,
         controls,
@@ -518,7 +492,6 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
         unitScale: 0.1
     });
 
-    // リサイズ対応
     window.addEventListener("resize", onResize);
     function onResize() {
         const W = container.clientWidth, H = container.clientHeight || 600;
@@ -527,7 +500,6 @@ function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
         camera.updateProjectionMatrix();
     }
 
-    // ループ
     (function animate() {
         requestAnimationFrame(animate);
         controls.update();
