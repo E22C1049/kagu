@@ -1,508 +1,438 @@
-let accessToken = null;
-let latestJson = null;
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 
-/* Google Drive 認証 */
-function handleCredentialResponse(_) {
-    console.log("Googleログイン成功");
-    requestAccessToken();
+/* 家具定義（増やす場合はここに追記） */
+const furnitures = [
+  { id: 'desk', label: '机', file: '机.glb' },
+  { id: 'sofa', label: 'ソファ', file: 'ソファ.glb' },
+];
+
+/* DOM */
+const canvas = document.getElementById('canvas');
+const furnList = document.getElementById('furnList');
+const partsList = document.getElementById('parts');
+const current = document.getElementById('current');
+const btnReset = document.getElementById('btnReset');
+const btnExport = document.getElementById('btnExport');
+const importJson = document.getElementById('importJson');
+const uiColor = document.getElementById('uiColor');
+const btnApplyColor = document.getElementById('btnApplyColor');
+const btnIsolate = document.getElementById('btnIsolate');
+const btnShowAll = document.getElementById('btnShowAll');
+const sizeX = document.getElementById('sizeX');
+const sizeY = document.getElementById('sizeY');
+const sizeZ = document.getElementById('sizeZ');
+const btnApplySize = document.getElementById('btnApplySize');
+const sizeInputs = document.querySelectorAll('.sizeInput');
+
+/* Three.js 基本 */
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(100, 100);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffffff);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+camera.position.set(2.5, 1.6, 3.2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0.75, 0);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8bbbd9, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(5, 8, 4);
+scene.add(dir);
+
+const grid = new THREE.GridHelper(10, 20, 0xdddddd, 0xeeeeee);
+scene.add(grid);
+
+/* === 視認性UP: 中心の床線（X=赤、Z=青） ※Yの太線は削除 === */
+const AXIS_SIZE = 10;     // 長さ（グリッド幅程度）
+const AXIS_THICK = 0.025; // 太さ
+const axisGroup = new THREE.Group();
+// X軸（床の中心横線）- #e74a3b
+const xLine = new THREE.Mesh(
+  new THREE.BoxGeometry(AXIS_SIZE, 0.002, AXIS_THICK),
+  new THREE.MeshBasicMaterial({ color: '#e74a3b' })
+);
+xLine.position.set(0, 0.001, 0);
+axisGroup.add(xLine);
+// Z軸（床中央の縦線＝奥行方向）- 青
+const zLine = new THREE.Mesh(
+  new THREE.BoxGeometry(AXIS_THICK, 0.002, AXIS_SIZE),
+  new THREE.MeshBasicMaterial({ color: '#3498db' })
+);
+zLine.position.set(0, 0.001, 0);
+axisGroup.add(zLine);
+scene.add(axisGroup);
+
+/* 環境 */
+const pmrem = new THREE.PMREMGenerator(renderer);
+new RGBELoader()
+  .setDataType(THREE.HalfFloatType)
+  .load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/venice_sunset_1k.hdr', (tex) => {
+    scene.environment = pmrem.fromEquirectangular(tex).texture;
+    tex.dispose();
+  });
+
+/* ローダー */
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(
+  new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.159/examples/jsm/libs/draco/')
+);
+gltfLoader.setKTX2Loader(
+  new KTX2Loader()
+    .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.159/examples/jsm/libs/basis/')
+    .detectSupport(renderer)
+);
+
+/* CSS2D 寸法ラベル（□m） */
+const viewport = document.getElementById('viewport');
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.className = 'label-layer';
+viewport.appendChild(labelRenderer.domElement);
+
+function makeLabel(axis) { // 'x' | 'y' | 'z'
+  const el = document.createElement('div');
+  el.className = `dimLabel dim-${axis}`; // ラベル色はCSS（x:赤 / y:緑 / z:赤）のまま
+  el.innerHTML = `<span class="value">—</span><span class="unit">m</span>`;
+  const wrap = document.createElement('div');
+  wrap.style.position = 'absolute';
+  wrap.appendChild(el);
+  labelRenderer.domElement.appendChild(wrap);
+  return { el, wrap, obj: new THREE.Object3D() };
 }
-function requestAccessToken() {
-    google.accounts.oauth2.initTokenClient({
-        client_id: '479474446026-kej6f40kvfm6dsuvfeo5d4fm87c6god4.apps.googleusercontent.com',
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        callback: (tokenResponse) => {
-            accessToken = tokenResponse.access_token;
-            console.log("アクセストークン取得済");
-            updateFileSelect();
-        }
-    }).requestAccessToken();
-}
+const labelX = makeLabel('x');
+const labelY = makeLabel('y');
+const labelZ = makeLabel('z');
+scene.add(labelX.obj, labelY.obj, labelZ.obj);
 
-class Placement {
-    constructor({ scene, camera, renderer, controls = null, ui, unitScale = 1 }) {
-        this.scene = scene;
-        this.camera = camera;
-        this.renderer = renderer;
-        this.controls = controls;     
-        this.ui = ui || {};
-        this.unit = unitScale;         
+/* ===== 外寸ガイド（矢印） ===== */
+const GUIDE_THICK = 0.010;  // シャフト太さ
+const GUIDE_OFFSET = 0.05;   // 家具からの離し量（m）←視認性用オフセット
+const HEAD_BASE_H = 1;      // コーン基準高さ（スケール前）
+const HEAD_BASE_R = 0.10;   // コーン基準半径（スケール前）
 
-        this.objects = [];      
-        this.selected = null;   
-        this.outline = null;    
-        this.isDragging = false;
-        this.enabled = true;
-        this.snap = 0;          
+function makeDimGuide(color, axis) {
+  const g = new THREE.Group();
+  // シャフト
+  let shaftGeom;
+  if (axis === 'x') shaftGeom = new THREE.BoxGeometry(1, GUIDE_THICK, GUIDE_THICK);
+  else if (axis === 'y') shaftGeom = new THREE.BoxGeometry(GUIDE_THICK, 1, GUIDE_THICK);
+  else shaftGeom = new THREE.BoxGeometry(GUIDE_THICK, GUIDE_THICK, 1);
+  const mat = new THREE.MeshBasicMaterial({ color, depthTest: true });
+  const shaft = new THREE.Mesh(shaftGeom, mat);
+  g.add(shaft);
 
-        this.ray = new THREE.Raycaster();
-        this.ndc = new THREE.Vector2();
-        this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        this.dragOffset = new THREE.Vector3();
-        this.hit = new THREE.Vector3();
+  // 矢印ヘッド（両端）
+  const headGeom = new THREE.ConeGeometry(HEAD_BASE_R, HEAD_BASE_H, 16);
+  const head1 = new THREE.Mesh(headGeom, mat.clone());
+  const head2 = new THREE.Mesh(headGeom, mat.clone());
 
-        this._bindUI();
-        this._bindPointer();
-        this._updateStatus('ダブルクリックで選択');
-        if (this.ui.doneBtn) this.ui.doneBtn.disabled = true;
-        if (this.ui.delBtn) this.ui.delBtn.disabled = true;
-    }
+  // Coneは+Y方向へ尖る → 軸に合わせて回転
+  if (axis === 'x') {      // +X / -X
+    head1.rotation.z = -Math.PI / 2;
+    head2.rotation.z = Math.PI / 2;
+  } else if (axis === 'y') { // +Y / -Y
+    head2.rotation.x = Math.PI;
+  } else {                // 'z'
+    head1.rotation.x = Math.PI / 2;
+    head2.rotation.x = -Math.PI / 2;
+  }
+  g.add(head1, head2);
 
-    dispose() {
-        const el = this.renderer.domElement;
-        el.removeEventListener('dblclick', this._onDblClick);
-        el.removeEventListener('pointerdown', this._onDown);
-        el.removeEventListener('pointermove', this._onMove);
-        el.removeEventListener('pointerup', this._onUp);
-        window.removeEventListener('keydown', this._onKeyDown);
-
-        this._clearSelection();
-        this.objects.forEach(m => {
-            this.scene.remove(m);
-            m.geometry?.dispose();
-            m.material?.dispose();
-        });
-        this.objects = [];
-    }
-
-    setEnabled(flag) {
-        this.enabled = !!flag;
-        if (!this.enabled) {
-            this._clearSelection();
-            if (this.ui.genBtn) this.ui.genBtn.disabled = true;
-        } else {
-            if (this.ui.genBtn) this.ui.genBtn.disabled = false;
-        }
-    }
-
-    _bindUI() {
-        const { wEl, hEl, dEl, genBtn, doneBtn, delBtn, statusEl } = this.ui;
-        this.wEl = wEl; this.hEl = hEl; this.dEl = dEl;
-        this.genBtn = genBtn; this.doneBtn = doneBtn; this.delBtn = delBtn; this.statusEl = statusEl;
-
-        if (this.genBtn) {
-            this.genBtn.addEventListener('click', () => {
-                if (!this.enabled) return;
-                const w = parseFloat(this.wEl?.value ?? '1');
-                const h = parseFloat(this.hEl?.value ?? '1');
-                const d = parseFloat(this.dEl?.value ?? '1');
-                if (![w, h, d].every(Number.isFinite) || w <= 0 || h <= 0 || d <= 0) {
-                    alert('幅・高さ・奥行きには 0 より大きい数値を入力してください。');
-                    return;
-                }
-                this.addBox({ width: w, height: h, depth: d });
-            });
-        }
-        if (this.doneBtn) this.doneBtn.addEventListener('click', () => this._clearSelection());
-        if (this.delBtn) this.delBtn.addEventListener('click', () => this._deleteSelected());
-
-        this._onKeyDown = (e) => {
-            if (!this.enabled) return;
-            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
-                e.preventDefault();
-                this._deleteSelected();
-            }
-        };
-        window.addEventListener('keydown', this._onKeyDown);
-    }
-
-    _bindPointer() {
-        const el = this.renderer.domElement;
-
-        this._onDblClick = (ev) => {
-            if (!this.enabled) return;
-            this._setNDC(ev);
-            this.ray.setFromCamera(this.ndc, this.camera);
-            const hits = this.ray.intersectObjects(this.objects, false);
-            if (hits.length > 0) this._select(hits[0].object);
-        };
-
-        this._onDown = (ev) => {
-            if (!this.enabled || !this.selected) return;
-            this._setNDC(ev);
-            this.ray.setFromCamera(this.ndc, this.camera);
-            const hits = this.ray.intersectObject(this.selected, false);
-            if (hits.length === 0) return;
-            if (this.ray.ray.intersectPlane(this.dragPlane, this.hit)) {
-                this.dragOffset.copy(this.hit).sub(this.selected.position);
-                this.isDragging = true;
-                if (this.controls) this.controls.enabled = false;
-            }
-        };
-
-        this._onMove = (ev) => {
-            if (!this.enabled || !this.isDragging || !this.selected) return;
-            this._setNDC(ev);
-            this.ray.setFromCamera(this.ndc, this.camera);
-            if (this.ray.ray.intersectPlane(this.dragPlane, this.hit)) {
-                const target = new THREE.Vector3().copy(this.hit).sub(this.dragOffset);
-                if (this.snap > 0) {
-                    target.x = Math.round(target.x / this.snap) * this.snap;
-                    target.z = Math.round(target.z / this.snap) * this.snap;
-                }
-                const H = this._getHeight(this.selected);
-                this.selected.position.set(target.x, H / 2, target.z);
-                if (this.outline) this.outline.position.copy(this.selected.position);
-            }
-        };
-
-        this._onUp = () => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                if (this.controls) this.controls.enabled = true;
-            }
-        };
-
-        el.addEventListener('dblclick', this._onDblClick);
-        el.addEventListener('pointerdown', this._onDown);
-        el.addEventListener('pointermove', this._onMove);
-        el.addEventListener('pointerup', this._onUp);
-    }
-
-    _setNDC(ev) {
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.ndc.set(
-            ((ev.clientX - rect.left) / rect.width) * 2 - 1,
-            -((ev.clientY - rect.top) / rect.height) * 2 + 1
-        );
-    }
-
-    _updateStatus(text) {
-        if (this.statusEl) this.statusEl.textContent = text;
-    }
-
-    _getHeight(mesh) {
-        const p = mesh.geometry?.parameters;
-        return p?.height ?? 1;
-    }
-
-    addBox({ width = 1, height = 1, depth = 1, color = 0x2194ce, position = null }) {
-        const W = width * this.unit;
-        const H = height * this.unit;
-        const D = depth * this.unit;
-
-        const geo = new THREE.BoxGeometry(W, H, D);
-        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.0 });
-        const box = new THREE.Mesh(geo, mat);
-        box.castShadow = true; box.receiveShadow = true;
-        box.position.copy(position ?? new THREE.Vector3(0, H / 2, 0)); // 底面をy=0に
-        this.scene.add(box);
-        this.objects.push(box);
-
-        this._clearSelection();
-    }
-
-    _select(mesh) {
-        if (this.selected === mesh) return;
-        this._clearSelection(true); // ハイライトのみ解除
-        this.selected = mesh;
-
-        const edges = new THREE.EdgesGeometry(mesh.geometry);
-        const mat = new THREE.LineBasicMaterial({ color: 0x0077ff });
-        this.outline = new THREE.LineSegments(edges, mat);
-        this.outline.position.copy(mesh.position);
-        this.scene.add(this.outline);
-
-        mesh.material.emissive = new THREE.Color(0x113355);
-        mesh.material.emissiveIntensity = 0.15;
-
-        this._updateStatus('選択中（ダブルクリックで選択／ドラッグで移動）');
-        if (this.doneBtn) this.doneBtn.disabled = false;
-        if (this.delBtn) this.delBtn.disabled = false;
-    }
-
-    _clearSelection(keepObj = false) {
-        if (this.outline) {
-            this.scene.remove(this.outline);
-            this.outline.geometry.dispose();
-            this.outline.material.dispose();
-            this.outline = null;
-        }
-        if (this.selected?.material) this.selected.material.emissiveIntensity = 0;
-        this.selected = keepObj ? this.selected : null;
-        this.isDragging = false;
-        if (this.controls) this.controls.enabled = true;
-
-        this._updateStatus('ダブルクリックで選択');
-        if (this.doneBtn) this.doneBtn.disabled = true;
-        if (this.delBtn) this.delBtn.disabled = true;
-    }
-
-    _deleteSelected() {
-        if (!this.selected) return;
-        if (this.outline) {
-            this.scene.remove(this.outline);
-            this.outline.geometry.dispose();
-            this.outline.material.dispose();
-            this.outline = null;
-        }
-        const i = this.objects.indexOf(this.selected);
-        if (i >= 0) this.objects.splice(i, 1);
-        this.scene.remove(this.selected);
-        this.selected.geometry.dispose();
-        this.selected.material.dispose();
-        this.selected = null;
-
-        this._updateStatus('削除しました');
-        if (this.doneBtn) this.doneBtn.disabled = true;
-        if (this.delBtn) this.delBtn.disabled = true;
-        if (this.controls) this.controls.enabled = true;
-    }
+  g.userData = { axis, shaft, head1, head2, color };
+  return g;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-    const uploadHeader = document.getElementById("upload-header");
-    const uploadContainer = document.getElementById("upload-container");
-    const resultHeader = document.getElementById("result-header");
-    const resultContainer = document.getElementById("result-container");
-    const analyzeBtn = document.getElementById("analyzeBtn");
-    const previewImg = document.getElementById("preview");
-    const resultPre = document.getElementById("result");
-    const saveBtn = document.getElementById("saveBtn");
-    const loadBtn = document.getElementById("loadBtn");
-    const filenameInput = document.getElementById("filenameInput");
-    const fileSelect = document.getElementById("fileSelect");
-    const wEl = document.getElementById('boxW');
-    const hEl = document.getElementById('boxH');
-    const dEl = document.getElementById('boxD');
-    const genBtn = document.getElementById('genBoxBtn');
-    const doneBtn = document.getElementById('moveDoneBtn');
-    const delBtn = document.getElementById('moveDeleteBtn');
-    const statusEl = document.getElementById('placeStatus');
+// ガイド作成（X=赤 / Y=青 / Z=青）
+const guideX = makeDimGuide('#e74a3b', 'x');
+const guideY = makeDimGuide('#2ECC71', 'y');
+const guideZ = makeDimGuide('#3498db', 'z');
+scene.add(guideX, guideY, guideZ);
 
-    analyzeBtn.addEventListener("click", analyzeImage);
+// ガイド更新
+function updateGuide(guide, start, end) {
+  const { axis, shaft, head1, head2 } = guide.userData;
+  const dir = new THREE.Vector3().subVectors(end, start);
+  const len = dir.length();
+  if (len < 1e-6) { guide.visible = false; return; }
+  guide.visible = true;
 
-    // 折りたたみ
-    const openContainer = (c) => { c.classList.remove("collapsed"); c.classList.add("expanded"); };
-    const closeContainer = (c) => { c.classList.remove("expanded"); c.classList.add("collapsed"); };
-    const toggleExclusive = (openElem, closeElem) => {
-        if (openElem.classList.contains("expanded")) closeContainer(openElem);
-        else { openContainer(openElem); closeContainer(closeElem); }
-    };
-    uploadHeader.addEventListener("click", () => toggleExclusive(uploadContainer, resultContainer));
-    resultHeader.addEventListener("click", () => toggleExclusive(resultContainer, uploadContainer));
+  const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+  guide.position.copy(center);
 
-    // 画像プレビュー
-    let selectedFile = null;
-    document.getElementById("imageInput").addEventListener("change", (e) => {
-        selectedFile = e.target.files[0];
-        if (!selectedFile) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            previewImg.src = event.target.result;
-            openContainer(uploadContainer);
-            closeContainer(resultContainer);
-        };
-        reader.readAsDataURL(selectedFile);
-    });
+  const headLen = Math.min(0.25, Math.max(0.06, len * 0.10));
+  const shaftLen = Math.max(0.001, len - headLen * 2);
 
-    // ローディング表示
-    const loadingText = document.createElement("div");
-    loadingText.style.color = "#008cff";
-    loadingText.style.fontWeight = "bold";
-    loadingText.style.marginTop = "10px";
-    document.querySelector(".left-pane").appendChild(loadingText);
+  // シャフトのスケール（軸方向のみ長さ適用）
+  if (axis === 'x') shaft.scale.set(shaftLen, 1, 1);
+  else if (axis === 'y') shaft.scale.set(1, shaftLen, 1);
+  else shaft.scale.set(1, 1, shaftLen);
 
-    let loadingInterval;
+  // ヘッドのスケーリング
+  const headRadius = GUIDE_THICK * 1.8;
+  const scaleR = headRadius / HEAD_BASE_R;
+  const scaleH = headLen / HEAD_BASE_H;
+  if (axis === 'x') { head1.scale.set(scaleH, scaleR, scaleR); head2.scale.set(scaleH, scaleR, scaleR); }
+  else if (axis === 'y') { head1.scale.set(scaleR, scaleH, scaleR); head2.scale.set(scaleR, scaleH, scaleR); }
+  else { head1.scale.set(scaleR, scaleR, scaleH); head2.scale.set(scaleR, scaleR, scaleH); }
 
-    async function analyzeImage() {
-        if (!selectedFile) { alert("画像を選択してください"); return; }
+  // 端点（ローカル座標）
+  const offStart = new THREE.Vector3().subVectors(start, center);
+  const offEnd = new THREE.Vector3().subVectors(end, center);
+  head1.position.copy(offEnd);
+  head2.position.copy(offStart);
+}
 
-        analyzeBtn.disabled = true;
-        loadingText.textContent = "分析中";
-        let dotCount = 0;
-        loadingInterval = setInterval(() => {
-            dotCount = (dotCount + 1) % 4;
-            loadingText.textContent = "分析中" + ".".repeat(dotCount);
-        }, 500);
+/* 状態 */
+let root = null, nodes = [], selected = null;
+let initialState = {};
+const bbox = new THREE.Box3(), sizeV = new THREE.Vector3(), centerV = new THREE.Vector3();
+let isEditingSize = false;
 
-        const model = "floor-plan-japan";
-        const version = 7;
-        const apiKey = "E0aoexJvBDgvE3nb1jkc";
+/* ユーティリティ */
+const h = (t, p = {}, ...c) => {
+  const e = document.createElement(t);
+  Object.entries(p).forEach(([k, v]) => {
+    if (k === 'class') e.className = v;
+    else if (k === 'html') e.innerHTML = v;
+    else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) e.setAttribute(k, v);
+  });
+  c.forEach((x) => e.appendChild(typeof x === 'string' ? document.createTextNode(x) : x));
+  return e;
+};
+const stdMat = (n) => (n?.isMesh ? (Array.isArray(n.material) ? n.material[0] : n.material) : null);
+function worldToScreen(obj) {
+  const v = obj.getWorldPosition(new THREE.Vector3()).clone().project(camera);
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
+}
 
-        const formData = new FormData();
-        formData.append("file", selectedFile);
+/* 家具UI生成 */
+function buildFurnitureUI() {
+  furnList.innerHTML = '';
+  furnitures.forEach((f, i) => {
+    const btn = h('button', { class: 'furn-btn', onclick: () => selectFurniture(f, btn) }, f.label);
+    if (i === 0) btn.classList.add('active');
+    furnList.appendChild(btn);
+  });
+}
+async function selectFurniture(f, btnEl) {
+  [...furnList.children].forEach((b) => b.classList.remove('active'));
+  btnEl?.classList.add('active');
+  await loadModel(f.file);
+}
 
-        const url = `https://detect.roboflow.com/${model}/${version}?api_key=${apiKey}`;
+/* パーツ一覧 */
+function refreshPartsList() {
+  partsList.innerHTML = '';
+  nodes.forEach((n) => {
+    const item = h('div', { class: 'item' },
+      h('input', {
+        type: 'checkbox', ...(n.visible ? { checked: '' } : {}),
+        oninput: (e) => { n.visible = e.target.checked; updateBBoxAndLabels(true); }
+      }),
+      h('span', { class: 'name' }, n.name || '(no-name)'),
+      h('button', { onclick: () => selectNode(n) }, '選択')
+    );
+    partsList.appendChild(item);
+  });
+}
+function selectNode(n) {
+  selected = n;
+  current.textContent = n ? (n.name || '(no-name)') : '—';
+}
 
-        try {
-            const res = await fetch(url, { method: "POST", body: formData });
-            const result = await res.json();
+/* BBox/ラベル＆ガイド更新 */
+function updateBBoxAndLabels(skipInput = false) {
+  if (!root) return;
+  bbox.setFromObject(root);
+  bbox.getSize(sizeV); bbox.getCenter(centerV);
 
-            clearInterval(loadingInterval);
-            loadingText.textContent = "";
-            latestJson = result;
+  if (!skipInput && !isEditingSize) {
+    sizeX.value = sizeV.x.toFixed(2);
+    sizeY.value = sizeV.y.toFixed(2);
+    sizeZ.value = sizeV.z.toFixed(2);
+  }
+  // ラベル値
+  labelX.el.querySelector('.value').textContent = sizeV.x.toFixed(2);
+  labelY.el.querySelector('.value').textContent = sizeV.y.toFixed(2);
+  labelZ.el.querySelector('.value').textContent = sizeV.z.toFixed(2);
 
-            resultPre.textContent = JSON.stringify(result, null, 2);
-            openContainer(resultContainer); closeContainer(uploadContainer);
+  // ラベル位置（辺の中点）
+  const { min, max } = bbox;
+  labelX.obj.position.set((min.x + max.x) / 2, min.y, max.z);
+  labelZ.obj.position.set(max.x, min.y, (min.z + max.z) / 2);
+  labelY.obj.position.set(min.x, (min.y + max.y) / 2, (min.z + max.z) / 2);
 
-            draw3D(result.predictions, result.image.width, result.image.height, {
-                placementUI: { wEl, hEl, dEl, genBtn, doneBtn, delBtn, statusEl }
-            });
-        } catch (err) {
-            clearInterval(loadingInterval);
-            loadingText.textContent = "エラー: " + err.message;
-        } finally {
-            analyzeBtn.disabled = false;
-        }
-    }
+  // DOM座標追従
+  [labelX, labelY, labelZ].forEach((L) => {
+    const s = worldToScreen(L.obj);
+    L.wrap.style.left = s.x + 'px';
+    L.wrap.style.top = s.y + 'px';
+  });
 
-    // Drive 保存
-    saveBtn.addEventListener("click", () => {
-        if (!accessToken || !latestJson) return alert("ログインまたは解析が必要です");
-        const filename = filenameInput.value.trim();
-        if (!filename) return alert("保存名を入力してください");
+  // ==== 矢印ガイド（家具から少し離して表示） ====
+  const EPS = 0.002; // 床からの浮かせ
+  // X：手前の面より少し手前（z=max.z + GUIDE_OFFSET）
+  updateGuide(
+    guideX,
+    new THREE.Vector3(min.x, min.y + EPS, max.z + GUIDE_OFFSET),
+    new THREE.Vector3(max.x, min.y + EPS, max.z + GUIDE_OFFSET)
+  );
+  // Z：右側の面より少し右（x=max.x + GUIDE_OFFSET）
+  updateGuide(
+    guideZ,
+    new THREE.Vector3(max.x + GUIDE_OFFSET, min.y + EPS, min.z),
+    new THREE.Vector3(max.x + GUIDE_OFFSET, min.y + EPS, max.z)
+  );
+  // Y：左側の面より少し左（x=min.x - GUIDE_OFFSET）
+  updateGuide(
+    guideY,
+    new THREE.Vector3(min.x - GUIDE_OFFSET, min.y, (min.z + max.z) / 2),
+    new THREE.Vector3(min.x - GUIDE_OFFSET, max.y, (min.z + max.z) / 2)
+  );
+}
 
-        const metadata = { name: `${filename}.json`, mimeType: 'application/json' };
-        const file = new Blob([JSON.stringify(latestJson)], { type: 'application/json' });
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', file);
-
-        fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
-            body: form
-        }).then(res => res.json()).then(_ => {
-            alert('保存完了'); updateFileSelect();
-        }).catch(err => {
-            console.error(err); alert('保存失敗');
-        });
-    });
-
-    // Drive 読み込み
-    loadBtn.addEventListener("click", () => {
-        const fileId = fileSelect.value;
-        if (!accessToken || !fileId) return alert("ログインまたはファイルを選択してください");
-
-        fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-            headers: new Headers({ 'Authorization': 'Bearer ' + accessToken })
-        }).then(res => res.json()).then(data => {
-            latestJson = data;
-            resultPre.textContent = JSON.stringify(data, null, 2);
-            openContainer(resultContainer); closeContainer(uploadContainer);
-            draw3D(data.predictions, data.image.width, data.image.height, {
-                placementUI: { wEl, hEl, dEl, genBtn, doneBtn, delBtn, statusEl }
-            });
-        }).catch(err => {
-            console.error(err); alert('読み込みに失敗しました');
-        });
-    });
-
-    const deleteBtn = document.getElementById("deleteBtn");
-    deleteBtn.addEventListener("click", () => {
-        const fileId = fileSelect.value;
-        if (!accessToken || !fileId) return alert("ログインまたはファイルを選択してください");
-        const confirmDelete = confirm("本当にこのファイルを削除しますか？");
-        if (!confirmDelete) return;
-
-        fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-            method: "DELETE",
-            headers: new Headers({ Authorization: "Bearer " + accessToken })
-        })
-            .then((res) => {
-                if (res.status === 204) { alert("ファイルを削除しました"); updateFileSelect(); }
-                else { throw new Error("削除に失敗しました"); }
-            })
-            .catch((err) => { console.error(err); alert("削除エラー: " + err.message); });
-    });
-
-    function updateFileSelect() {
-        if (!accessToken) return;
-        fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/json'`, {
-            headers: new Headers({ 'Authorization': 'Bearer ' + accessToken })
-        }).then(res => res.json()).then(fileList => {
-            fileSelect.innerHTML = `<option value="">読み込むファイルを選択</option>`;
-            (fileList.files || []).forEach(file => {
-                const option = document.createElement("option");
-                option.value = file.id;
-                option.textContent = file.name;
-                fileSelect.appendChild(option);
-            });
-        });
-    }
+/* 外寸適用 */
+function applySize() {
+  if (!root) return;
+  bbox.setFromObject(root);
+  const now = new THREE.Vector3(); bbox.getSize(now);
+  const tx = Math.max(0.001, parseFloat(sizeX.value) || now.x);
+  const ty = Math.max(0.001, parseFloat(sizeY.value) || now.y);
+  const tz = Math.max(0.001, parseFloat(sizeZ.value) || now.z);
+  root.scale.multiply(new THREE.Vector3(tx / now.x, ty / now.y, tz / now.z));
+  updateBBoxAndLabels();
+}
+btnApplySize.addEventListener('click', applySize);
+sizeInputs.forEach((inp) => {
+  inp.addEventListener('focus', () => (isEditingSize = true));
+  inp.addEventListener('blur', () => { isEditingSize = false; });
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { isEditingSize = false; applySize(); } });
 });
 
-function draw3D(predictions, imageWidth, imageHeight, opts = {}) {
-    const placementUI = opts.placementUI || null;
+/* 色適用（選択なし→全体） */
+btnApplyColor.addEventListener('click', () => {
+  const targets = selected ? [selected] : nodes;
+  targets.forEach((n) => {
+    const m = stdMat(n); if (!m) return;
+    (m.color ||= new THREE.Color()).set(uiColor.value);
+    m.needsUpdate = true;
+  });
+});
 
-    const container = document.getElementById("three-container");
-    container.innerHTML = "";
+/* モデル読込（日本語ファイル名OK） */
+async function loadModel(urlRaw) {
+  try {
+    const base = new URL('.', window.location.href);
+    const abs = new URL(urlRaw.trim(), base).href; // これで十分（追加の encodeURI は不要）
 
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    const W = container.clientWidth;
-    const H = container.clientHeight || 600;
-    renderer.setSize(W, H);
-    renderer.shadowMap.enabled = true;
-    container.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf2f2f2);
-
-    const aspect = W / H;
-    const camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
-    camera.position.set(3.2, 3.2, 3.2);
-    camera.lookAt(0, 0, 0);
-
-    const controls = new window.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.15;
-    controls.screenSpacePanning = false;
-    controls.maxPolarAngle = Math.PI / 2;
-
-    const dir = new THREE.DirectionalLight(0xffffff, 1);
-    dir.position.set(6, 10, 4);
-    dir.castShadow = true;
-    dir.shadow.mapSize.set(2048, 2048);
-    scene.add(dir);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-
-    const floorGeo = new THREE.PlaneGeometry(20, 20);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0xE6E6E6, roughness: 0.9, metalness: 0.0 });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    const pxToWorld = 0.01; 
-    const classColors = {
-        "left side": 0xffffff, "right side": 0xffffff, "top side": 0xffffff, "under side": 0xffffff,
-        wall: 0xaaaaaa, door: 0x8b4513, "glass door": 0x87cefa,
-        window: 0x1e90ff, closet: 0xffa500, fusuma: 0xda70d6,
-    };
-
-    (predictions || []).forEach((pred) => {
-        const w = Math.max(pred.width * pxToWorld, 0.01);
-        const h = Math.max(pred.height * pxToWorld, 0.01);
-        const geometry = new THREE.BoxGeometry(w, 0.1, h);
-        const color = classColors[pred.class] || 0xffffff;
-        const material = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.0, transparent: true, opacity: 0.85 });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.x = (pred.x - imageWidth / 2) * pxToWorld;
-        mesh.position.y = 0.05;
-        mesh.position.z = -(pred.y - imageHeight / 2) * pxToWorld;
-        mesh.receiveShadow = true;
-        scene.add(mesh);
-    });
-
-    const placement = new Placement({
-        scene, camera, renderer,
-        controls,
-        ui: placementUI || {},
-        unitScale: 0.1
-    });
-
-    window.addEventListener("resize", onResize);
-    function onResize() {
-        const W = container.clientWidth, H = container.clientHeight || 600;
-        renderer.setSize(W, H);
-        camera.aspect = W / H;
-        camera.updateProjectionMatrix();
+    if (root) {
+      scene.remove(root);
+      root.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material?.dispose) o.material.dispose(); });
     }
+    nodes = []; selected = null; initialState = {}; current.textContent = '—';
 
-    (function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-    })();
+    const gltf = await new Promise((res, rej) => gltfLoader.load(abs, res, undefined, rej));
+    root = gltf.scene; scene.add(root);
+
+    root.traverse((o) => {
+      if (o.isMesh) {
+        nodes.push(o);
+        const m = stdMat(o);
+        initialState[o.uuid] = { visible: o.visible, color: m?.color?.getHex?.() ?? null, name: o.name || '' };
+      }
+    });
+
+    // カメラ合わせ
+    const b = new THREE.Box3().setFromObject(root), s = new THREE.Vector3(), c = new THREE.Vector3();
+    b.getSize(s); b.getCenter(c);
+    controls.target.copy(c);
+    const maxDim = Math.max(s.x, s.y, s.z);
+    const camZ = (maxDim * 1.7) / Math.tan((camera.fov * Math.PI) / 360);
+    camera.position.set(c.x + camZ * 0.25, c.y + maxDim * 0.8, c.z + camZ);
+    camera.lookAt(c); controls.update();
+
+    refreshPartsList();
+    updateBBoxAndLabels();
+  } catch (err) {
+    console.error('[GLB load failed]', err);
+    alert('モデルの読み込みに失敗しました。GLBの配置とファイル名を確認してください。');
+  }
 }
+
+/* 上部ボタン */
+btnReset.addEventListener('click', () => {
+  nodes.forEach((n) => {
+    const st = initialState[n.uuid]; if (!st) return;
+    n.visible = st.visible;
+    const m = stdMat(n);
+    if (m && st.color != null) { m.color.setHex(st.color); m.needsUpdate = true; }
+  });
+  if (root) root.scale.set(1, 1, 1);
+  refreshPartsList(); updateBBoxAndLabels();
+});
+btnExport.addEventListener('click', () => {
+  const data = nodes.map((n) => {
+    const m = stdMat(n);
+    return { uuid: n.uuid, name: n.name || '', visible: n.visible, material: m ? { color: m.color?.getHex?.() ?? null } : null };
+  });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'furniture-config.json'; a.click(); URL.revokeObjectURL(a.href);
+});
+importJson.addEventListener('change', async (e) => {
+  const f = e.target.files?.[0]; if (!f) return;
+  const text = await f.text();
+  let data = [];
+  try { data = JSON.parse(text); } catch { alert('JSONの読み込みに失敗しました'); return; }
+  const map = new Map(data.map((d) => [d.uuid, d]));
+  nodes.forEach((n) => {
+    const d = map.get(n.uuid); if (!d) return;
+    n.visible = !!d.visible;
+    const m = stdMat(n);
+    if (m && d.material && d.material.color != null) { m.color.setHex(d.material.color); m.needsUpdate = true; }
+  });
+  refreshPartsList(); updateBBoxAndLabels(true);
+});
+btnIsolate.addEventListener('click', () => { if (!selected) return; nodes.forEach((n) => (n.visible = n === selected)); refreshPartsList(); updateBBoxAndLabels(true); });
+btnShowAll.addEventListener('click', () => { nodes.forEach((n) => (n.visible = true)); refreshPartsList(); updateBBoxAndLabels(true); });
+
+/* レイアウト＆ループ */
+function resize() {
+  const w = window.innerWidth - 320 - 360 - 12 * 2 - 12 * 2;
+  const h = window.innerHeight - 90;
+  renderer.setSize(Math.max(360, w), Math.max(320, h));
+  labelRenderer.setSize(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+  labelRenderer.domElement.style.left = renderer.domElement.offsetLeft + 'px';
+  labelRenderer.domElement.style.top = renderer.domElement.offsetTop + 'px';
+  camera.aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  updateBBoxAndLabels(true); // 入力編集中の上書きはスキップ
+  labelRenderer.render(scene, camera);
+  renderer.render(scene, camera);
+});
+
+/* 起動：UI生成→最初の家具を自動表示 */
+resize();
+buildFurnitureUI();
+selectFurniture(furnitures[0], furnList.firstElementChild).catch((err) => {
+  console.error(err);
+  alert('モデルの読み込みに失敗しました。GLBの配置とファイル名を確認してください。');
+});
