@@ -2,179 +2,110 @@
 <html lang="ja">
 
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>間取りめいく | ポータル</title>
-    <style>
-        :root {
-            --tab-h: 56px;
-            --bg: #0f172a;
-            /* 上部バー */
-            --fg: #e5e7eb;
-            --accent: #38bdf8;
-        }
+  <meta charset="UTF-8" />
+  <title>間取り分析＆3D表示</title>
+  <link rel="stylesheet" href="styleMadori.css" />
 
-        * {
-            box-sizing: border-box;
-        }
+  <!-- three.js を importmap + ES module で使う -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+      }
+    }
+  </script>
 
-        html,
-        body {
-            height: 100%;
-        }
-
-        body {
-            margin: 0;
-            background: #111827;
-            color: #e5e7eb;
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans JP", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-        }
-
-        /* Top bar */
-        .topbar {
-            height: var(--tab-h);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 0 16px;
-            background: linear-gradient(180deg, #0b1220, #0a0f1c);
-            border-bottom: 1px solid #1f2937;
-        }
-
-        .brand {
-            font-weight: 700;
-            letter-spacing: .02em;
-            color: #cbd5e1;
-            margin-right: 12px;
-        }
-
-        .tabs {
-            display: flex;
-            gap: 6px;
-        }
-
-        .tab {
-            appearance: none;
-            border: 1px solid #263041;
-            background: #0f172a;
-            color: var(--fg);
-            border-radius: 10px;
-            padding: 8px 14px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all .15s ease;
-            line-height: 1;
-        }
-
-        .tab[aria-selected="true"] {
-            border-color: #334155;
-            color: white;
-            outline: 0;
-            background: #0b1324;
-            box-shadow: inset 0 0 0 1px #334155, 0 0 0 1px #0b1324;
-        }
-
-        .tab:focus-visible {
-            outline: 2px solid var(--accent);
-        }
-
-        /* Workspace */
-        .workspace {
-            position: fixed;
-            inset: var(--tab-h) 0 0 0;
-            display: grid;
-        }
-
-        .panel {
-            width: 100%;
-            height: 100%;
-            border: 0;
-            display: none;
-            /* toggle */
-            background: #0b0f1a;
-        }
-
-        .panel.active {
-            display: block;
-        }
-
-        /* 小さなヘルプ */
-        .hint {
-            margin-left: auto;
-            font-size: 12px;
-            color: #a1a1aa;
-            opacity: .9;
-        }
-
-        @media (max-width: 640px) {
-            .brand {
-                display: none;
-            }
-
-            .hint {
-                display: none;
-            }
-
-            .tab {
-                padding: 8px 10px;
-            }
-        }
-    </style>
+  <!-- Google ログイン -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 
 <body>
-    <header class="topbar" role="tablist" aria-label="ページ切替">
-        <div class="brand">間取りめいく</div>
+  <div class="container">
+    <!-- 左：メインエリア（青） -->
+    <div class="left-pane">
+      <!-- 間取り画像を選んで分析 -->
+      <section class="card card-blue">
+        <h2 class="section-title">間取り画像を選んで分析</h2>
+        <div class="analyze-controls">
+          <div class="file-input-wrapper">
+            <input type="file" id="imageInput" accept="image/*" />
+          </div>
+          <input id="filenameInput" type="text" placeholder="保存名を入力" class="text-input" />
+          <button id="analyzeBtn">Roboflowで分析</button>
+          <button id="saveBtn" class="btn-save">Driveに保存</button>
+          <select id="fileSelect" class="select-input">
+            <option value="">読み込むファイルを選択</option>
+          </select>
+          <button id="loadBtn" class="btn-login">Driveから読み込み</button>
+          <button id="deleteBtn" class="btn-delete">選択ファイルを削除</button>
+        </div>
+      </section>
 
-        <div class="tabs">
-            <!-- 左に「間取り図生成」 / 右に「家具生成」 -->
-            <button id="tab-floor" class="tab" role="tab" aria-controls="panel-floor"
-                aria-selected="true">間取り図生成</button>
-            <button id="tab-furniture" class="tab" role="tab" aria-controls="panel-furniture"
-                aria-selected="false">家具生成</button>
+      <!-- 3D 間取り & 家具配置（3Dビュー本体） -->
+      <section class="card card-blue">
+        <h2 class="section-title">3D間取り＆家具配置</h2>
+        <div id="three-container" class="three-canvas"></div>
+      </section>
+
+    </div>
+
+    <!-- 右：ツール＆アップロード＆JSON -->
+    <aside class="right-pane">
+      <!-- 物体生成 + 家具ライブラリ（赤） -->
+      <section class="card tool-panel">
+        <h2 class="section-title">物体生成（四角形）</h2>
+        <div class="placebar">
+          <label>幅x
+            <input type="number" id="boxW" value="1" step="0.1">
+          </label>
+          <label>高y
+            <input type="number" id="boxH" value="1" step="0.1">
+          </label>
+          <label>奥z
+            <input type="number" id="boxD" value="1" step="0.1">
+          </label>
+          <button id="genBoxBtn">物体生成</button>
+        </div>
+        <div class="placebar" style="margin-top:6px;">
+          <span id="placeStatus"
+            style="font-size:12px;padding:4px 8px;background:#eef6ff;border:1px solid #cfe5ff;border-radius:6px;color:#1155cc;">
+            ダブルクリックで選択
+          </span>
+          <button id="moveDoneBtn" disabled>完了</button>
+          <button id="moveDeleteBtn" disabled>削除</button>
         </div>
 
-        <div class="hint">左: 間取り（index.html） / 右: 家具（index_desk.html）</div>
-    </header>
+        <h2 class="section-title" style="margin-top:12px;">家具ライブラリ</h2>
+        <div id="libraryList" class="library-list"></div>
+      </section>
 
-    <main class="workspace">
-        <!-- 間取り図生成：既存 index.html をそのまま表示 -->
-        <iframe id="panel-floor" class="panel active" role="tabpanel" title="間取り図生成"
-            src="./間取り図/indexMadori.html"></iframe>
+      <!-- アップロード画像（黄） -->
+      <section class="card upload-panel">
+        <h3 class="section-title small collapsible-header" id="upload-header">アップロード画像</h3>
+        <div id="upload-container" class="expanded">
+          <img id="preview" alt="アップロード画像" />
+        </div>
+      </section>
 
-        <!-- 家具生成：これまでの家具ページを表示（ファイル名は必要に応じて変更） -->
-        <iframe id="panel-furniture" class="panel" role="tabpanel" title="家具生成" src="./家具生成/indexKagu.html"></iframe>
-    </main>
+      <!-- 分析結果 JSON（紫） -->
+      <section class="card json-panel">
+        <h3 class="section-title small collapsible-header" id="result-header">分析結果 JSON</h3>
+        <div id="result-container" class="expanded">
+          <pre id="result">まだ分析されていません</pre>
+        </div>
+      </section>
+    </aside>
+  </div>
 
-    <script>
-        // シンプルなタブ切替（ARIA対応）
-        const tabs = [
-            { btn: document.getElementById('tab-floor'), panel: document.getElementById('panel-floor') },
-            { btn: document.getElementById('tab-furniture'), panel: document.getElementById('panel-furniture') },
-        ];
+  <!-- Google ログインボタン -->
+  <div id="g_id_onload" data-client_id="479474446026-kej6f40kvfm6dsuvfeo5d4fm87c6god4.apps.googleusercontent.com"
+    data-callback="handleCredentialResponse" data-scope="https://www.googleapis.com/auth/drive.file">
+  </div>
+  <div class="g_id_signin" data-type="standard"></div>
 
-        function activate(idx) {
-            tabs.forEach((t, i) => {
-                const active = i === idx;
-                t.btn.setAttribute('aria-selected', String(active));
-                t.panel.classList.toggle('active', active);
-            });
-            // フォーカスをタブに戻すと操作感が良い
-            tabs[idx].btn.focus({ preventScroll: true });
-        }
-
-        tabs[0].btn.addEventListener('click', () => activate(0));
-        tabs[1].btn.addEventListener('click', () => activate(1));
-
-        // キーボード操作（←→で移動、Enter/Spaceで決定）
-        document.addEventListener('keydown', (e) => {
-            const idx = tabs.findIndex(t => t.btn.getAttribute('aria-selected') === 'true');
-            if (e.key === 'ArrowRight') { e.preventDefault(); activate((idx + 1) % tabs.length); }
-            if (e.key === 'ArrowLeft') { e.preventDefault(); activate((idx - 1 + tabs.length) % tabs.length); }
-            if (e.key === 'Home') { e.preventDefault(); activate(0); }
-            if (e.key === 'End') { e.preventDefault(); activate(tabs.length - 1); }
-        });
-    </script>
+  <!-- ★ ESモジュールとして読み込む（scriptMadori.js の import 文が動く） -->
+  <script type="module" src="scriptMadori.js"></script>
 </body>
 
 </html>
