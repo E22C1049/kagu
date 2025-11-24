@@ -241,4 +241,25 @@ button:disabled {
 #result-container.expanded {
   max-height: 260px;
   padding: 8px;
+
+}
+
+/* 3D 間取り＆家具配置エリアのコンテナ */
+.three-canvas {
+  width: 100%;
+  /* 好きな高さに固定（例：画面の 60% くらい） */
+  height: 60vh;          /* または 480px など固定値でもOK */
+  max-height: 600px;
+
+  background: #1e1e1e;   /* 下の茶色を消したいならここを変更 */
+  border-radius: 12px;
+  overflow: hidden;      /* キャンバスがはみ出さないようにする */
+  position: relative;
+}
+
+/* three.js の canvas がコンテナにぴったり収まるようにする */
+.three-canvas canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
