@@ -435,18 +435,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const res = await fetch(url, { method: 'POST', body: formData });
-      const result = await res.json();
 
-      clearInterval(loadingInterval);
-      loadingText.textContent = '';
-      latestJson = result;
-      if (resultPre) {
-        resultPre.textContent = JSON.stringify(result, null, 2);
-      }
-      openContainer(resultContainer);
-      closeContainer(uploadContainer);
+// ★ HTTP ステータスが 200 以外なら、中身を読んでエラーにする
+if (!res.ok) {
+  const text = await res.text();
+  throw new Error(`Roboflow HTTP ${res.status}: ${text}`);
+}
 
-      initSceneWithFloorplan(result.predictions, result.image.width, result.image.height);
+const result = await res.json();
+console.log('Roboflow result:', result);
+
+// ★ 想定通りの形じゃなければエラーにする
+if (!result || !result.image || !result.predictions) {
+  throw new Error('Roboflowレスポンス形式が想定と違います: ' + JSON.stringify(result));
+}
+
+clearInterval(loadingInterval);
+loadingText.textContent = '';
+latestJson = result;
+if (resultPre) {
+  resultPre.textContent = JSON.stringify(result, null, 2);
+}
+openContainer(resultContainer);
+closeContainer(uploadContainer);
+
+initSceneWithFloorplan(result.predictions, result.image.width, result.image.height);
+
     } catch (err) {
       clearInterval(loadingInterval);
       loadingText.textContent = 'エラー: ' + err.message;
@@ -697,3 +711,4 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     if (renderer && scene && camera) renderer.render(scene, camera);
   })();
 }
+
