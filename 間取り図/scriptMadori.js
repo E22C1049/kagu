@@ -132,6 +132,43 @@ function colorFromPreset(preset) {
   return typeColors[baseId] || 0x888888;
 }
 
+
+/* プリセットの外寸を「m」に統一して返す
+   - 中間案: UI表示/保存は cm, Three.js シーンは m
+   - 旧データ（m保存）も残っている可能性があるので、unit が無い場合は値から推定して吸収する */
+function presetSizeToMeters(preset) {
+  const size = (preset && preset.size) ? preset.size : {};
+  const rx = Number(size.x);
+  const ry = Number(size.y);
+  const rz = Number(size.z);
+
+  const unitRaw =
+    (preset && (preset.sizeUnit || preset.unit || preset.units || preset.lengthUnit)) || '';
+  const unit = String(unitRaw).toLowerCase().trim();
+
+  // まず unit 指定があればそれを優先
+  let factor = 1; // 乗算して m にする係数
+  if (unit === 'cm') factor = 0.01;
+  else if (unit === 'm' || unit === 'meter' || unit === 'meters') factor = 1;
+  else {
+    // unit が無ければ値から推定（家具寸法で 10m 超は現実的にほぼ無いので cm 扱い）
+    const candidates = [rx, ry, rz].filter((v) => Number.isFinite(v));
+    const maxv = candidates.length ? Math.max(...candidates) : 1;
+    factor = maxv > 10 ? 0.01 : 1;
+  }
+
+  const fallbackRaw = (factor === 0.01) ? 100 : 1; // 100cm=1m, 1m=1m
+  const xRaw = Number.isFinite(rx) ? rx : fallbackRaw;
+  const yRaw = Number.isFinite(ry) ? ry : fallbackRaw;
+  const zRaw = Number.isFinite(rz) ? rz : fallbackRaw;
+
+  return {
+    x: Math.max(0.1, xRaw * factor),
+    y: Math.max(0.1, yRaw * factor),
+    z: Math.max(0.1, zRaw * factor)
+  };
+}
+
 /* プリセットから本物の家具(GLB)を生成 */
 async function spawnFurnitureFromPreset(preset) {
   if (!scene) {
@@ -139,12 +176,7 @@ async function spawnFurnitureFromPreset(preset) {
     return;
   }
 
-  const size = preset.size || {};
-  const target = {
-    x: Math.max(0.1, Number(size.x) || 1),
-    y: Math.max(0.1, Number(size.y) || 1),
-    z: Math.max(0.1, Number(size.z) || 1)
-  };
+  const target = presetSizeToMeters(preset);
 
   const baseId = preset.baseId || 'generic';
   const name = preset.name || baseId;
@@ -639,12 +671,80 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   scene.add(dir);
   scene.add(new THREE.AmbientLight(0x404040));
 
-  const scale = 0.01;
+  //const scale = 0.01; 間取りの大きさ
+  const scale = 0.1;
+  // グループ化（後で「壁だけ」でカメラを寄せるため）
+  const floorGroup = new THREE.Group();
+  const wallsGroup = new THREE.Group();
+  scene.add(floorGroup);
+  scene.add(wallsGroup);
+
   const floorGeometry = new THREE.PlaneGeometry(imageWidth * scale, imageHeight * scale);
   const floorMaterial = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
   floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
+  floor.userData.isFloor = true;
+  floorGroup.add(floor);
+
+  // ===== スケール変更に追従して「見た目が平べったい」を防ぐ調整 =====
+  const floorW = imageWidth * scale;
+  const floorH = imageHeight * scale;
+  const sceneSize = Math.max(floorW, floorH);
+
+  // 初期値（後で「壁の範囲」に合わせて自動フレーミングする）
+  camera.far = Math.max(1000, sceneSize * 10);
+  camera.updateProjectionMatrix();
+  camera.position.set(sceneSize * 0.6, sceneSize * 0.5, sceneSize * 0.6);
+  camera.lookAt(0, 0, 0);
+
+  if (controls) {
+    controls.target.set(0, 0, 0);
+    controls.maxDistance = sceneSize * 6;
+    controls.update();
+  }
+
+  // ライトの初期位置（後でフレーミング結果に合わせて調整）
+  dir.position.set(sceneSize * 0.25, sceneSize * 0.7, sceneSize * 0.35);
+  dir.target.position.set(0, 0, 0);
+  scene.add(dir.target);
+
+  // ★ 指定オブジェクトにカメラを「寄せる」
+  function frameCameraToObject(obj3d, padding = 1.05) {
+    if (!obj3d || !camera) return;
+    const box = new THREE.Box3().setFromObject(obj3d);
+    if (box.isEmpty()) return;
+
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = THREE.MathUtils.degToRad(camera.fov);
+    let distance = (maxDim / 2) / Math.tan(fov / 2);
+    distance *= padding;
+
+    // 少し斜め上から見る（見やすい角度）
+    const dirVec = new THREE.Vector3(1, 0.75, 1).normalize();
+
+    camera.near = Math.max(0.1, distance / 200);
+    camera.far = Math.max(1000, distance * 200);
+    camera.updateProjectionMatrix();
+
+    camera.position.copy(center).addScaledVector(dirVec, distance);
+    camera.lookAt(center);
+
+    if (controls) {
+      controls.target.copy(center);
+      controls.minDistance = Math.max(0.1, distance * 0.12);
+      controls.maxDistance = distance * 10;
+      controls.update();
+    }
+
+    // ライトも中心へ寄せる
+    dir.position.set(center.x + distance * 0.25, center.y + distance * 0.85, center.z + distance * 0.35);
+    dir.target.position.copy(center);
+  }
 
   const classColors = {
     wall: 0x999999,
@@ -660,7 +760,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     if (ignoreList.includes(pred.class)) return;
     const geometry = new THREE.BoxGeometry(
       pred.width * scale,
-      0.5,
+      2.4,
       pred.height * scale
     );
     const color = classColors[pred.class] || 0xffffff;
@@ -668,11 +768,16 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     const mesh = new THREE.Mesh(geometry, material);
 
     mesh.position.x = (pred.x - imageWidth / 2) * scale;
-    mesh.position.y = 0.75;
+    mesh.position.y = 2.4 / 2;
     mesh.position.z = -(pred.y - imageHeight / 2) * scale;
 
-    scene.add(mesh);
+    wallsGroup.add(mesh);
   });
+
+  // 分析後、最初の表示で「引きすぎ」にならないよう、壁の範囲でカメラを自動で寄せる
+  // ※壁が1つも無い場合だけ床を基準にする
+  if (wallsGroup.children.length) frameCameraToObject(wallsGroup, 1.05);
+  else frameCameraToObject(floorGroup, 1.15);
 
   // ドラッグ周りのセットアップ
   draggableObjects = [];
