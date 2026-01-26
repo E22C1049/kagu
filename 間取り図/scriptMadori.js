@@ -5,15 +5,23 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 let accessToken = null;
 let latestJson = null;
 
-// Roboflow settings
-const ROBOFLOW_MODEL = 'floor-plan-japan';
-const ROBOFLOW_VERSION = 7;
-const ROBOFLOW_API_KEY = 'E0aoexJvBDgvE3nb1jkc';
+/* =========================
+   Roboflow settings（更新版）
+   ========================= */
+// 3モデル（newscript.js の構成を移植）
+const ROBOFLOW_API = {
+  outer: "https://detect.roboflow.com/floor-plan-japan-base-6xuaz/2?api_key=E0aoexJvBDgvE3nb1jkc",
+  inner: "https://detect.roboflow.com/floor-plan-japan/7?api_key=E0aoexJvBDgvE3nb1jkc",
+  extra: "https://detect.roboflow.com/floor-plan-japan-2-menv0/1?api_key=E0aoexJvBDgvE3nb1jkc&confidence=0.25"
+};
 
-// Furniture presets (shared with 家具生成タブ)
+// UIは変えないので、常に 3モデル合成を使う
+const ROBOFLOW_MODE = "all";
+
+/* ========== Furniture presets (shared with 家具生成タブ) ========== */
 const FURN_STORAGE_KEY = 'madomake_furniturePresets';
 
-// GLB model paths (relative to 間取り図/indexMadori.html)
+/* ========== GLB model paths (relative to 間取り図/indexMadori.html) ========== */
 const GLB_PATHS = {
   desk: '../家具生成/机.glb',
   sofa: '../家具生成/ソファ.glb'
@@ -21,13 +29,13 @@ const GLB_PATHS = {
 
 const gltfLoader = new GLTFLoader();
 
-// Three.js globals
+/* ========== Three.js globals ========== */
 let scene = null;
 let camera = null;
 let renderer = null;
 let controls = null;
 
-// Drag / select globals
+/* ========== Drag / select globals ========== */
 let raycaster = null;
 let pointer = null;
 let dragPlane = null;
@@ -38,7 +46,7 @@ let selectedObject = null;
 let isDragging = false;
 let threeContainerRect = null;
 
-// UI refs
+/* ========== UI refs ========== */
 let placeStatusEl = null;
 let moveDoneBtn = null;
 let moveDeleteBtn = null;
@@ -48,10 +56,12 @@ let boxDEl = null;
 let fileSelectEl = null;
 let libraryListEl = null;
 
-// Unit scale for boxes (1 = 1m 相当)
+/* Unit scale for boxes (1 = 1m 相当) */
 const UNIT_SCALE = 1.0;
 
-/* ========== Google Drive 認証 ========== */
+/* =========================
+   Google Drive 認証
+   ========================= */
 function handleCredentialResponse(_) {
   console.log('Googleログイン成功');
   requestAccessToken();
@@ -72,7 +82,9 @@ function requestAccessToken() {
     .requestAccessToken();
 }
 
-/* ========== localStorage: 家具プリセット取得 ========== */
+/* =========================
+   localStorage: 家具プリセット取得
+   ========================= */
 function getFurniturePresets() {
   const raw = localStorage.getItem(FURN_STORAGE_KEY);
   console.log('[MADORI] localStorage key =', FURN_STORAGE_KEY, 'raw =', raw);
@@ -132,10 +144,7 @@ function colorFromPreset(preset) {
   return typeColors[baseId] || 0x888888;
 }
 
-
-/* プリセットの外寸を「m」に統一して返す
-   - 中間案: UI表示/保存は cm, Three.js シーンは m
-   - 旧データ（m保存）も残っている可能性があるので、unit が無い場合は値から推定して吸収する */
+/* プリセットの外寸を「m」に統一して返す */
 function presetSizeToMeters(preset) {
   const size = (preset && preset.size) ? preset.size : {};
   const rx = Number(size.x);
@@ -146,7 +155,6 @@ function presetSizeToMeters(preset) {
     (preset && (preset.sizeUnit || preset.unit || preset.units || preset.lengthUnit)) || '';
   const unit = String(unitRaw).toLowerCase().trim();
 
-  // まず unit 指定があればそれを優先
   let factor = 1; // 乗算して m にする係数
   if (unit === 'cm') factor = 0.01;
   else if (unit === 'm' || unit === 'meter' || unit === 'meters') factor = 1;
@@ -157,7 +165,7 @@ function presetSizeToMeters(preset) {
     factor = maxv > 10 ? 0.01 : 1;
   }
 
-  const fallbackRaw = (factor === 0.01) ? 100 : 1; // 100cm=1m, 1m=1m
+  const fallbackRaw = (factor === 0.01) ? 100 : 1;
   const xRaw = Number.isFinite(rx) ? rx : fallbackRaw;
   const yRaw = Number.isFinite(ry) ? ry : fallbackRaw;
   const zRaw = Number.isFinite(rz) ? rz : fallbackRaw;
@@ -172,7 +180,7 @@ function presetSizeToMeters(preset) {
 /* プリセットから本物の家具(GLB)を生成 */
 async function spawnFurnitureFromPreset(preset) {
   if (!scene) {
-    alert('先に「Roboflowで分析」で3D表示を生成してください。');
+    alert('先に「分析（Roboflow）」で3D表示を生成してください。');
     return;
   }
 
@@ -183,7 +191,6 @@ async function spawnFurnitureFromPreset(preset) {
   const modelPath = GLB_PATHS[baseId];
   const colorHex = colorFromPreset(preset);
 
-  // 該当GLBがなければ箱で代用
   if (!modelPath) {
     addBoxAtCenter(target.x, target.y, target.z, colorHex, { baseId, name });
     return;
@@ -201,7 +208,6 @@ async function spawnFurnitureFromPreset(preset) {
       }
     });
 
-    // 元のサイズを取得
     const bbox = new THREE.Box3().setFromObject(root);
     const curSize = new THREE.Vector3();
     bbox.getSize(curSize);
@@ -209,7 +215,6 @@ async function spawnFurnitureFromPreset(preset) {
     curSize.y = curSize.y || 1;
     curSize.z = curSize.z || 1;
 
-    // 目標外寸に合わせてスケーリング
     const scaleVec = new THREE.Vector3(
       target.x / curSize.x,
       target.y / curSize.y,
@@ -217,14 +222,12 @@ async function spawnFurnitureFromPreset(preset) {
     );
     root.scale.copy(scaleVec);
 
-    // スケール後に床・原点に合わせる
     const bbox2 = new THREE.Box3().setFromObject(root);
     const center2 = new THREE.Vector3();
     bbox2.getCenter(center2);
 
     root.position.set(-center2.x, -bbox2.min.y, -center2.z);
 
-    // 色適用
     root.traverse((o) => {
       if (o.isMesh && o.material && 'color' in o.material) {
         o.material.color.setHex(colorHex);
@@ -232,7 +235,6 @@ async function spawnFurnitureFromPreset(preset) {
       }
     });
 
-    // ドラッグ可能な家具としてマーク
     root.userData.draggable = true;
     root.userData.baseId = baseId;
     root.userData.label = name;
@@ -243,22 +245,20 @@ async function spawnFurnitureFromPreset(preset) {
   } catch (err) {
     console.error('[MADORI] GLB load failed', err);
     alert('家具モデルの読み込みに失敗しました（' + name + '）。パスやファイル名を確認してください。');
-    // フォールバックとして箱を出す
     addBoxAtCenter(target.x, target.y, target.z, colorHex, { baseId, name });
   }
 }
 
-/* 手動で出す箱（物体生成ボタン用） */
+/* 手動で出す箱 */
 function addBoxAtCenter(w, h, d, color = 0x2194ce, meta = {}) {
   if (!scene) {
-    alert('先に「Roboflowで分析」で3D表示を生成してください。');
+    alert('先に「分析（Roboflow）」で3D表示を生成してください。');
     return;
   }
   const geo = new THREE.BoxGeometry(w * UNIT_SCALE, h * UNIT_SCALE, d * UNIT_SCALE);
   const mat = new THREE.MeshLambertMaterial({ color });
   const mesh = new THREE.Mesh(geo, mat);
 
-  // 底面が床に乗るように
   mesh.position.set(0, (h * UNIT_SCALE) / 2, 0);
 
   mesh.userData.draggable = true;
@@ -285,7 +285,9 @@ function selectObject(obj) {
   if (moveDeleteBtn) moveDeleteBtn.disabled = !selectedObject;
 }
 
-/* ========== Raycast / Drag ========== */
+/* =========================
+   Raycast / Drag
+   ========================= */
 function updatePointerFromEvent(event) {
   if (!renderer) return;
   if (!threeContainerRect) {
@@ -361,7 +363,9 @@ function onPointerUp() {
   }
 }
 
-/* ========== Google Drive ファイル一覧更新 ========== */
+/* =========================
+   Google Drive ファイル一覧更新
+   ========================= */
 function updateFileSelect() {
   if (!accessToken || !fileSelectEl) return;
   fetch("https://www.googleapis.com/drive/v3/files?q=mimeType='application/json'", {
@@ -380,7 +384,198 @@ function updateFileSelect() {
     .catch((err) => console.error(err));
 }
 
-/* ========== DOMContentLoaded ========== */
+/* =========================
+   Roboflow 合成ロジック（newscript.js 移植）
+   ========================= */
+async function runRoboflow(url, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(url, { method: 'POST', body: formData });
+  return await res.json();
+}
+
+function calcIoU(a, b) {
+  const ax1 = a.x - a.width / 2;
+  const ax2 = a.x + a.width / 2;
+  const ay1 = a.y - a.height / 2;
+  const ay2 = a.y + a.height / 2;
+
+  const bx1 = b.x - b.width / 2;
+  const bx2 = b.x + b.width / 2;
+  const by1 = b.y - b.height / 2;
+  const by2 = b.y + b.height / 2;
+
+  const interX = Math.max(0, Math.min(ax2, bx2) - Math.max(ax1, bx1));
+  const interY = Math.max(0, Math.min(ay2, by2) - Math.max(ay1, by1));
+  const intersect = interX * interY;
+
+  const areaA = a.width * a.height;
+  const areaB = b.width * b.height;
+  const union = areaA + areaB - intersect;
+
+  if (union <= 0) return 0;
+  return intersect / union;
+}
+
+// Wall ↔ Fusuma の隙間を埋める（Wall↔Wallは無視）
+function fillWallGaps(preds, maxDist = 40) {
+  const walls = preds.filter(p => p.class === "wall" || p.class === "fusuma");
+  const filled = [];
+
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const a = walls[i];
+      const b = walls[j];
+
+      const isPair =
+        (a.class === "wall" && b.class === "fusuma") ||
+        (a.class === "fusuma" && b.class === "wall");
+
+      if (!isPair) continue;
+
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < maxDist) {
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+
+        const newWidth = Math.max(4, Math.abs(a.x - b.x) + 4);
+        const newHeight = Math.max(4, Math.abs(a.y - b.y) + 4);
+
+        filled.push({
+          class: "wall",
+          x: midX,
+          y: midY,
+          width: newWidth,
+          height: newHeight,
+          confidence: 0.99
+        });
+      }
+    }
+  }
+  return filled;
+}
+
+// 重なり優先ルール（チラつき防止）
+// - Wall vs Closet/Door -> Wall優先（Closet/Doorを落とす）
+// - Wall vs Window/Glass door -> Window/Glass door優先（Wallを落とす）
+function applyPriority(preds) {
+  const result = [];
+  const items = preds.slice();
+
+  items.forEach(p => {
+    // base/outer は絶対に残す（床生成で使う）
+    if (p.class === "base" || p.class === "outer") {
+      result.push(p);
+      return;
+    }
+
+    let skip = false;
+
+    for (let k = 0; k < items.length; k++) {
+      const other = items[k];
+      if (p === other) continue;
+
+      // base/outer とは比較しない（巨大に重なるので誤除外を防ぐ）
+      if (other.class === "base" || other.class === "outer") continue;
+
+      if (calcIoU(p, other) < 0.15) continue;
+
+      if ((p.class === "closet" || p.class === "door") && other.class === "wall") {
+        skip = true;
+        break;
+      }
+
+      if (p.class === "wall" && (other.class === "window" || other.class === "glass door")) {
+        skip = true;
+        break;
+      }
+
+      // 同クラスが高IoUなら confidence 低い方を落とす
+      if (p.class === other.class) {
+        const iou = calcIoU(p, other);
+        if (iou > 0.6) {
+          if ((p.confidence || 0) < (other.confidence || 0)) {
+            skip = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!skip) result.push(p);
+  });
+
+  return result;
+}
+
+async function runAllModels(file) {
+  const outer = await runRoboflow(ROBOFLOW_API.outer, file);
+  const inner = await runRoboflow(ROBOFLOW_API.inner, file);
+  const extra = await runRoboflow(ROBOFLOW_API.extra, file);
+
+  const outerBase =
+    (outer && outer.predictions) ? outer.predictions.find(p => p.class === "base") : null;
+
+  // base が取れなかったら inner をそのまま使う（フォールバック）
+  if (!outerBase) {
+    const fallback = inner || {};
+    return {
+      image: fallback.image || outer.image || extra.image || { width: 100, height: 100 },
+      predictions: (fallback.predictions || []).filter(p => p.class !== "base" && p.class !== "outer")
+    };
+  }
+
+  const outerBox = outerBase;
+
+  function isInside(pred) {
+    return (
+      pred.x > outerBox.x - outerBox.width / 2 &&
+      pred.x < outerBox.x + outerBox.width / 2 &&
+      pred.y > outerBox.y - outerBox.height / 2 &&
+      pred.y < outerBox.y + outerBox.height / 2
+    );
+  }
+
+  function notBase(pred) {
+    return pred.class !== "base" && pred.class !== "outer";
+  }
+
+  const filteredInner = (inner.predictions || []).filter(p => isInside(p) && notBase(p));
+  const filteredExtra = (extra.predictions || []).filter(p => isInside(p) && notBase(p));
+
+  let finalPreds = [outerBox, ...filteredInner];
+
+  // extra は inner と同一クラスで IoU>0.4 なら捨てる
+  filteredExtra.forEach(e => {
+    let duplicate = false;
+    for (let i = 0; i < filteredInner.length; i++) {
+      const ii = filteredInner[i];
+      if (e.class === ii.class && calcIoU(e, ii) > 0.4) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) finalPreds.push(e);
+  });
+
+  // 壁隙間補完（Wall ↔ Fusuma）
+  finalPreds.push(...fillWallGaps(finalPreds, 40));
+
+  // 優先ルール適用
+  finalPreds = applyPriority(finalPreds);
+
+  return {
+    image: outer.image || inner.image || extra.image || { width: 100, height: 100 },
+    predictions: finalPreds
+  };
+}
+
+/* =========================
+   DOMContentLoaded
+   ========================= */
 document.addEventListener('DOMContentLoaded', () => {
   const uploadHeader = document.getElementById('upload-header');
   const uploadContainer = document.getElementById('upload-container');
@@ -404,7 +599,6 @@ document.addEventListener('DOMContentLoaded', () => {
   moveDeleteBtn = document.getElementById('moveDeleteBtn');
   libraryListEl = document.getElementById('libraryList');
 
-  // 折りたたみ
   function openContainer(el) {
     el.classList.remove('collapsed');
     el.classList.add('expanded');
@@ -439,12 +633,14 @@ document.addEventListener('DOMContentLoaded', () => {
     reader.readAsDataURL(selectedFile);
   });
 
-  // 分析中テキスト
-  const loadingText = document.createElement('div');
-  loadingText.style.color = '#008cff';
-  loadingText.style.fontWeight = 'bold';
-  loadingText.style.marginTop = '10px';
-  document.querySelector('.left-pane').appendChild(loadingText);
+  // ボタン横のステータス（既存UIを使用）
+  let loadingText = document.getElementById('analyzeInlineStatus');
+  if (!loadingText) {
+    loadingText = document.createElement('span');
+    loadingText.className = 'inlineStatus';
+    loadingText.setAttribute('aria-live', 'polite');
+    analyzeBtn.insertAdjacentElement('afterend', loadingText);
+  }
 
   let loadingInterval = null;
 
@@ -453,6 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('画像を選択してください');
       return;
     }
+
     analyzeBtn.disabled = true;
     loadingText.textContent = '分析中';
     let dotCount = 0;
@@ -461,16 +658,18 @@ document.addEventListener('DOMContentLoaded', () => {
       loadingText.textContent = '分析中' + '.'.repeat(dotCount);
     }, 500);
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    const url = `https://detect.roboflow.com/${ROBOFLOW_MODEL}/${ROBOFLOW_VERSION}?api_key=${ROBOFLOW_API_KEY}`;
-
     try {
-      const res = await fetch(url, { method: 'POST', body: formData });
-      const result = await res.json();
+      let result;
+      if (ROBOFLOW_MODE === "all") {
+        result = await runAllModels(selectedFile);
+      } else {
+        // 一応残す（今は使わない）
+        result = await runRoboflow(ROBOFLOW_API.inner, selectedFile);
+      }
 
       clearInterval(loadingInterval);
       loadingText.textContent = '';
+
       latestJson = result;
       if (resultPre) {
         resultPre.textContent = JSON.stringify(result, null, 2);
@@ -478,10 +677,12 @@ document.addEventListener('DOMContentLoaded', () => {
       openContainer(resultContainer);
       closeContainer(uploadContainer);
 
-      initSceneWithFloorplan(result.predictions, result.image.width, result.image.height);
+      const iw = result?.image?.width || 100;
+      const ih = result?.image?.height || 100;
+      initSceneWithFloorplan(result.predictions, iw, ih);
     } catch (err) {
       clearInterval(loadingInterval);
-      loadingText.textContent = 'エラー: ' + err.message;
+      loadingText.textContent = 'エラー: ' + (err.message || err);
       console.error(err);
     } finally {
       analyzeBtn.disabled = false;
@@ -544,7 +745,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         openContainer(resultContainer);
         closeContainer(uploadContainer);
-        initSceneWithFloorplan(data.predictions, data.image.width, data.image.height);
+
+        const iw = data?.image?.width || 100;
+        const ih = data?.image?.height || 100;
+        // 旧データでも動くように：predictions をそのまま描画（baseが無ければ床はフォールバック）
+        initSceneWithFloorplan(data.predictions || [], iw, ih);
       })
       .catch((err) => {
         console.error(err);
@@ -580,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   });
 
-  // 物体生成
+  // 物体生成（隠しUI）
   if (genBoxBtn) {
     genBoxBtn.addEventListener('click', () => {
       const w = parseFloat(boxWEl.value || '1') || 1;
@@ -590,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 完了・削除
+  // 完了・削除（家具）
   if (moveDoneBtn) {
     moveDoneBtn.addEventListener('click', () => {
       selectObject(null);
@@ -605,7 +810,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 家具ライブラリを初期描画＆storageイベントで更新
   renderFurnitureLibrary();
   window.addEventListener('storage', (e) => {
     if (e.key === FURN_STORAGE_KEY) {
@@ -613,11 +817,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Drive のファイル一覧
   updateFileSelect();
 });
 
-/* ========== 間取りの3Dシーン構築 ========== */
+/* =========================
+   間取りの3Dシーン構築（床を base 優先に更新）
+   ========================= */
 function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   const container = document.getElementById('three-container');
   if (!container) {
@@ -625,7 +830,6 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     return;
   }
 
-  // 既存のcanvasを破棄
   if (renderer) {
     renderer.dispose();
     container.innerHTML = '';
@@ -642,110 +846,119 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
 
   camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 
-  // ★ コンテナサイズに合わせて renderer / camera を調整する関数
   function resizeRendererToContainer() {
     const width = container.clientWidth || 640;
     const height = container.clientHeight || 600;
-    renderer.setSize(width, height, false);      // false で CSS サイズをいじらない
+    renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     threeContainerRect = container.getBoundingClientRect();
   }
 
-  // 初回＆リサイズ時に実行
   resizeRendererToContainer();
   const ro = new ResizeObserver(resizeRendererToContainer);
   ro.observe(container);
   window.addEventListener('resize', resizeRendererToContainer);
-
-  camera.position.set(5, 5, 5);
-  camera.lookAt(0, 0, 0);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.25;
   controls.maxPolarAngle = Math.PI / 2;
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1);
-  dir.position.set(5, 10, 7);
-  scene.add(dir);
-  scene.add(new THREE.AmbientLight(0x404040));
+  // const dir = new THREE.DirectionalLight(0xffffff, 1);
+  // scene.add(dir);
+  // scene.add(new THREE.AmbientLight(0x404040));
+  // ===== ライト強化（見やすさ優先） =====
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xaaaaaa, 1.2)); // 上下から柔らかく
 
-  //const scale = 0.01; 間取りの大きさ
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35)); // 全体の底上げ
+
+  // 斜め上からのキーライト
+  const key = new THREE.DirectionalLight(0xffffff, 1.3);
+  key.position.set(50, 80, 50);
+  scene.add(key);
+
+  // 反対側からのフィルライト（影を潰しすぎない）
+  const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+  fill.position.set(-60, 50, -40);
+  scene.add(fill);
+
+  // ===== wall用テクスチャ（1回だけロード）=====
+  const texLoader = new THREE.TextureLoader();
+  const wallBaseTex = texLoader.load('テクスチャ/kabe.jpeg');   // indexMadori.html と同階層
+  wallBaseTex.colorSpace = THREE.SRGBColorSpace;     // 色がくすむの防止（three r152+）
+  wallBaseTex.wrapS = THREE.RepeatWrapping;
+  wallBaseTex.wrapT = THREE.RepeatWrapping;
+  wallBaseTex.anisotropy = 8;                        // 斜めから見たときのにじみ軽減
+
+  // ===== 床用テクスチャ =====
+  const floorTex = texLoader.load('テクスチャ/floor.jpg');
+  floorTex.colorSpace = THREE.SRGBColorSpace;
+  floorTex.wrapS = THREE.RepeatWrapping;
+  floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.anisotropy = 8;
+
+  // ===== 窓用テクスチャ =====
+  const windowTex = texLoader.load('テクスチャ/window.jpg');
+  windowTex.colorSpace = THREE.SRGBColorSpace;
+  windowTex.wrapS = THREE.RepeatWrapping;
+  windowTex.wrapT = THREE.RepeatWrapping;
+  windowTex.anisotropy = 8;
+
+
+
+
+
+  // 現行のスケールは維持（UI変更なし方針）
   const scale = 0.1;
-  // グループ化（後で「壁だけ」でカメラを寄せるため）
-  const floorGroup = new THREE.Group();
-  const wallsGroup = new THREE.Group();
-  scene.add(floorGroup);
-  scene.add(wallsGroup);
 
-  const floorGeometry = new THREE.PlaneGeometry(imageWidth * scale, imageHeight * scale);
-  const floorMaterial = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
+  // --- 床：base があれば base で床を作る。無ければ画像全体床（従来フォールバック） ---
+  const baseObj = (predictions || []).find(p => p.class === "base");
+  let floorW, floorH, floorX, floorZ;
+
+  if (baseObj) {
+    floorW = baseObj.width * scale;
+    floorH = baseObj.height * scale;
+    floorX = (baseObj.x - imageWidth / 2) * scale;
+    floorZ = -(baseObj.y - imageHeight / 2) * scale;
+  } else {
+    floorW = imageWidth * scale;
+    floorH = imageHeight * scale;
+    floorX = 0;
+    floorZ = 0;
+  }
+
+  // テクスチャの繰り返し回数（「2mで1回」くらい。好みで調整）
+  floorTex.repeat.set(Math.max(1, floorW / 10.0), Math.max(1, floorH / 10.0));
+
+  const floorGeometry = new THREE.PlaneGeometry(floorW, floorH);
+  const floorMaterial = new THREE.MeshLambertMaterial({
+    map: floorTex,
+    color: 0xffffff
+  });
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+
   floor.rotation.x = -Math.PI / 2;
-  floor.userData.isFloor = true;
-  floorGroup.add(floor);
+  floor.position.set(floorX, 0, floorZ);
+  scene.add(floor);
 
-  // ===== スケール変更に追従して「見た目が平べったい」を防ぐ調整 =====
-  const floorW = imageWidth * scale;
-  const floorH = imageHeight * scale;
+  // --- カメラ調整（従来の「平べったい」を避けるロジックは維持） ---
   const sceneSize = Math.max(floorW, floorH);
-
-  // 初期値（後で「壁の範囲」に合わせて自動フレーミングする）
   camera.far = Math.max(1000, sceneSize * 10);
   camera.updateProjectionMatrix();
-  camera.position.set(sceneSize * 0.6, sceneSize * 0.5, sceneSize * 0.6);
+  camera.position.set(sceneSize * 0.8, sceneSize * 0.8, sceneSize * 0.8);
   camera.lookAt(0, 0, 0);
 
-  if (controls) {
-    controls.target.set(0, 0, 0);
-    controls.maxDistance = sceneSize * 6;
-    controls.update();
-  }
+  controls.target.set(0, 0, 0);
+  controls.maxDistance = sceneSize * 5;
+  controls.update();
 
-  // ライトの初期位置（後でフレーミング結果に合わせて調整）
-  dir.position.set(sceneSize * 0.25, sceneSize * 0.7, sceneSize * 0.35);
-  dir.target.position.set(0, 0, 0);
-  scene.add(dir.target);
+  key.position.set(sceneSize * 0.35, sceneSize * 0.8, sceneSize * 0.55);
+  key.target.position.set(0, 0, 0);
+  scene.add(key.target);
 
-  // ★ 指定オブジェクトにカメラを「寄せる」
-  function frameCameraToObject(obj3d, padding = 1.05) {
-    if (!obj3d || !camera) return;
-    const box = new THREE.Box3().setFromObject(obj3d);
-    if (box.isEmpty()) return;
 
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = THREE.MathUtils.degToRad(camera.fov);
-    let distance = (maxDim / 2) / Math.tan(fov / 2);
-    distance *= padding;
-
-    // 少し斜め上から見る（見やすい角度）
-    const dirVec = new THREE.Vector3(1, 0.75, 1).normalize();
-
-    camera.near = Math.max(0.1, distance / 200);
-    camera.far = Math.max(1000, distance * 200);
-    camera.updateProjectionMatrix();
-
-    camera.position.copy(center).addScaledVector(dirVec, distance);
-    camera.lookAt(center);
-
-    if (controls) {
-      controls.target.copy(center);
-      controls.minDistance = Math.max(0.1, distance * 0.12);
-      controls.maxDistance = distance * 10;
-      controls.update();
-    }
-
-    // ライトも中心へ寄せる
-    dir.position.set(center.x + distance * 0.25, center.y + distance * 0.85, center.z + distance * 0.35);
-    dir.target.position.copy(center);
-  }
-
+  // --- 描画（base/outer/sideは無視。priorityを適用してから描画） ---
   const classColors = {
     wall: 0x999999,
     door: 0x8b4513,
@@ -754,32 +967,72 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     closet: 0xffa500,
     fusuma: 0xda70d6
   };
-  const ignoreList = ['left side', 'right side', 'under side', 'top side'];
+  const ignoreList = ['left side', 'right side', 'under side', 'top side', 'base', 'outer'];
 
-  (predictions || []).forEach((pred) => {
-    if (ignoreList.includes(pred.class)) return;
+  let drawPreds = (predictions || []).filter(p => !ignoreList.includes(p.class));
+  drawPreds = applyPriority(drawPreds);
+
+  drawPreds.forEach((pred) => {
     const geometry = new THREE.BoxGeometry(
       pred.width * scale,
       2.4,
       pred.height * scale
     );
-    const color = classColors[pred.class] || 0xffffff;
-    const material = new THREE.MeshLambertMaterial({ color });
+    let material;
+
+    if (pred.class === "wall") {
+      // 壁ごとに repeat を変えたいので clone を作る
+      const t = wallBaseTex.clone();
+      t.needsUpdate = true;
+
+      // だいたい「10mごとに1回繰り返す」くらいの感覚（好みで調整OK）
+      const wallW = pred.width * scale;   // X方向
+      const wallH = 2.4;                  // 壁高さ
+      t.repeat.set(Math.max(1, wallW / 2.0), Math.max(1, wallH / 2.0));
+
+      material = new THREE.MeshLambertMaterial({
+        map: t,
+        color: 0xffffff // テクスチャの色をそのまま出す
+      });
+
+    } else if (pred.class === "window") {
+      const t = windowTex.clone();
+      t.needsUpdate = true;
+
+      const w = pred.width * scale; // X方向
+      const h = 2.4;                // 壁高さ（今の実装に合わせる）
+      //t.repeat.set(Math.max(1, w / 2.0), Math.max(1, h / 2.0)); リピート表示
+      // ★リピートしない（1枚を引き延ばす）
+      t.wrapS = THREE.ClampToEdgeWrapping;
+      t.wrapT = THREE.ClampToEdgeWrapping;
+      t.repeat.set(1, 1);
+      t.offset.set(0, 0);
+
+      material = new THREE.MeshLambertMaterial({
+        map: t,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.75,              // ガラスっぽさ（好みで0.6〜0.9）
+        depthWrite: false,          // 透明の表示崩れを減らす
+        side: THREE.DoubleSide      // 両面見えるように
+      });
+    } else {
+      const color = classColors[pred.class] || 0xffffff;
+      material = new THREE.MeshLambertMaterial({ color });
+    }
+
     const mesh = new THREE.Mesh(geometry, material);
+
 
     mesh.position.x = (pred.x - imageWidth / 2) * scale;
     mesh.position.y = 2.4 / 2;
     mesh.position.z = -(pred.y - imageHeight / 2) * scale;
 
-    wallsGroup.add(mesh);
+    scene.add(mesh);
+
   });
 
-  // 分析後、最初の表示で「引きすぎ」にならないよう、壁の範囲でカメラを自動で寄せる
-  // ※壁が1つも無い場合だけ床を基準にする
-  if (wallsGroup.children.length) frameCameraToObject(wallsGroup, 1.05);
-  else frameCameraToObject(floorGroup, 1.15);
-
-  // ドラッグ周りのセットアップ
+  // --- ドラッグ周りのセットアップ ---
   draggableObjects = [];
   selectedObject = null;
   raycaster = new THREE.Raycaster();
