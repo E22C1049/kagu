@@ -882,7 +882,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   const fill = new THREE.DirectionalLight(0xffffff, 0.6);
   fill.position.set(-60, 50, -40);
   scene.add(fill);
-
+　//ここから画像テクスチャ
   // ===== wall用テクスチャ（1回だけロード）=====
   const texLoader = new THREE.TextureLoader();
   const wallBaseTex = texLoader.load('テクスチャ/kabe.jpeg');   // indexMadori.html と同階層
@@ -939,7 +939,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   doorTex.anisotropy = 8;
 
   // ===== ガラスドア用テクスチャ =====
-  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg'); // パスはあなたの構成に合わせて
+  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg'); 
   glassDoorTex.colorSpace = THREE.SRGBColorSpace;
   glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; // リピートしない（引き伸ばし）
   glassDoorTex.wrapT = THREE.ClampToEdgeWrapping;
@@ -1206,3 +1206,4 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     if (renderer && scene && camera) renderer.render(scene, camera);
   })();
 }
+
