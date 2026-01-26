@@ -905,6 +905,51 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   windowTex.wrapT = THREE.RepeatWrapping;
   windowTex.anisotropy = 8;
 
+  // ===== クローゼット用テクスチャ =====
+  const closetTex = texLoader.load('テクスチャ/closet.jpg');
+  closetTex.colorSpace = THREE.SRGBColorSpace;
+  closetTex.wrapS = THREE.ClampToEdgeWrapping;  // 伸ばし表示（リピートしない）
+  closetTex.wrapT = THREE.ClampToEdgeWrapping;
+  closetTex.anisotropy = 8;
+
+  // ===== クローゼット上面用テクスチャ =====
+  const closetTopTex = texLoader.load(
+    'テクスチャ/mokume1.png',
+    () => console.log('[OK] mokume1.png loaded'),
+    undefined,
+    (e) => console.error('[NG] mokume1.png load failed', e)
+  ); // ←上面に貼りたい画像
+  closetTopTex.colorSpace = THREE.SRGBColorSpace;
+  closetTopTex.wrapS = THREE.ClampToEdgeWrapping; // リピートしない
+  closetTopTex.wrapT = THREE.ClampToEdgeWrapping;
+  closetTopTex.anisotropy = 8;
+
+  // ===== ふすま用テクスチャ =====
+  const fusumaTex = texLoader.load('テクスチャ/fusuma.jpg');
+  fusumaTex.colorSpace = THREE.SRGBColorSpace;
+  fusumaTex.wrapS = THREE.ClampToEdgeWrapping; // リピートしない
+  fusumaTex.wrapT = THREE.ClampToEdgeWrapping;
+  fusumaTex.anisotropy = 8;
+
+  // ===== ドア用テクスチャ =====
+  const doorTex = texLoader.load('テクスチャ/door.jpeg');
+  doorTex.colorSpace = THREE.SRGBColorSpace;
+  doorTex.wrapS = THREE.ClampToEdgeWrapping; // 引き伸ばし（リピートなし）
+  doorTex.wrapT = THREE.ClampToEdgeWrapping;
+  doorTex.anisotropy = 8;
+
+  // ===== ガラスドア用テクスチャ =====
+  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg'); // パスはあなたの構成に合わせて
+  glassDoorTex.colorSpace = THREE.SRGBColorSpace;
+  glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; // リピートしない（引き伸ばし）
+  glassDoorTex.wrapT = THREE.ClampToEdgeWrapping;
+  glassDoorTex.anisotropy = 8;
+
+
+
+
+
+
 
 
 
@@ -1001,7 +1046,6 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
 
       const w = pred.width * scale; // X方向
       const h = 2.4;                // 壁高さ（今の実装に合わせる）
-      //t.repeat.set(Math.max(1, w / 2.0), Math.max(1, h / 2.0)); リピート表示
       // ★リピートしない（1枚を引き延ばす）
       t.wrapS = THREE.ClampToEdgeWrapping;
       t.wrapT = THREE.ClampToEdgeWrapping;
@@ -1015,6 +1059,113 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
         opacity: 0.75,              // ガラスっぽさ（好みで0.6〜0.9）
         depthWrite: false,          // 透明の表示崩れを減らす
         side: THREE.DoubleSide      // 両面見えるように
+      });
+    } else if (pred.class === "closet") {
+      // 側面（クローゼット画像）
+      const sideT = closetTex.clone();
+      sideT.needsUpdate = true;
+      sideT.wrapS = THREE.ClampToEdgeWrapping;
+      sideT.wrapT = THREE.ClampToEdgeWrapping;
+      sideT.repeat.set(1, 1);
+      sideT.offset.set(0, 0);
+      sideT.anisotropy = 16;
+
+      // 上面（木目）
+      const topT = closetTopTex.clone();
+      topT.needsUpdate = true;
+      topT.wrapS = THREE.ClampToEdgeWrapping;
+      topT.wrapT = THREE.ClampToEdgeWrapping;
+      topT.repeat.set(1, 1);
+      topT.offset.set(0, 0);
+      topT.anisotropy = 16;
+
+      // 木目の向きが合わないときはコメント解除
+      // topT.center.set(0.5, 0.5);
+      // topT.rotation = Math.PI / 2;
+
+      // BoxGeometry の面順: right, left, top, bottom, front, back
+      const mSide = new THREE.MeshLambertMaterial({
+        map: sideT,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+
+      const mTop = new THREE.MeshLambertMaterial({
+        map: topT,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+      material = [mSide, mSide, mTop, mSide, mSide, mSide];
+
+      // 底面は床に接してほぼ見えないので側面と同じでOK
+      material = [mSide, mSide, mTop, mSide, mSide, mSide];
+    } else if (pred.class === "fusuma") {
+      const t = fusumaTex.clone();
+      t.needsUpdate = true;
+
+      // ★リピートしない（1枚を引き延ばす）
+      t.wrapS = THREE.ClampToEdgeWrapping;
+      t.wrapT = THREE.ClampToEdgeWrapping;
+      t.repeat.set(1, 1);
+      t.offset.set(0, 0);
+      t.anisotropy = 16;
+
+      material = new THREE.MeshLambertMaterial({
+        map: t,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+    } else if (pred.class === "door") {
+      // 側面用（door.jpeg）
+      const sideT = doorTex.clone();
+      sideT.needsUpdate = true;
+      sideT.wrapS = THREE.ClampToEdgeWrapping;
+      sideT.wrapT = THREE.ClampToEdgeWrapping;
+      sideT.repeat.set(1, 1);
+      sideT.offset.set(0, 0);
+      sideT.anisotropy = 16;
+
+      // 上面用（mokume1.png）※クローゼット上面と同じテクスチャを流用
+      const topT = closetTopTex.clone();
+      topT.needsUpdate = true;
+      topT.wrapS = THREE.ClampToEdgeWrapping;
+      topT.wrapT = THREE.ClampToEdgeWrapping;
+      topT.repeat.set(1, 1);
+      topT.offset.set(0, 0);
+      topT.anisotropy = 16;
+
+      const mSide = new THREE.MeshLambertMaterial({
+        map: sideT,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+
+      const mTop = new THREE.MeshLambertMaterial({
+        map: topT,
+        color: 0xffffff,
+        side: THREE.DoubleSide
+      });
+      material = [mSide, mSide, mTop, mSide, mSide, mSide]; // right,left,top,bottom,front,back
+
+
+    } else if (pred.class === "glass door") {
+      const t = glassDoorTex.clone();
+      t.needsUpdate = true;
+
+      // ★リピートしない（1枚を引き延ばす）
+      t.wrapS = THREE.ClampToEdgeWrapping;
+      t.wrapT = THREE.ClampToEdgeWrapping;
+      t.repeat.set(1, 1);
+      t.offset.set(0, 0);
+      t.anisotropy = 16;
+
+      material = new THREE.MeshLambertMaterial({
+        map: t,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.75,        // ガラス感（0.6〜0.9で調整）
+        depthWrite: false,    // 透明の表示崩れを減らす
+        side: THREE.DoubleSide
       });
     } else {
       const color = classColors[pred.class] || 0xffffff;
