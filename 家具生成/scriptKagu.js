@@ -10,6 +10,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 const furnitures = [
   { id: 'desk', label: '机', file: '机.glb' },
   { id: 'sofa', label: 'ソファ', file: 'ソファ.glb' },
+  { id: 'bed', label: 'ベッド', file: 'ベッド.glb' },
 ];
 
 let currentFurniture = null; // ★ 今どの家具（机/ソファ）を編集しているか
@@ -649,17 +650,29 @@ if (btnSavePreset) {
 
     const color = uiColor.value || '#8a5a2b';
 
+    // 追加：メッシュごとの色を保存（順番+名前でキーを作る）
+    const meshColors = {};
+    nodes.forEach((n, i) => {
+      const m = stdMat(n);
+      if (!m || !m.color) return;
+      const key = `${i}:${(n.name || '').trim()}`;   // ← 復元用キー
+      meshColors[key] = `#${m.color.getHexString()}`;
+    });
+
+
     let items = loadPresets();
     // 同じ baseId + name があれば上書き
     items = items.filter(p => !(p.baseId === currentFurniture.id && p.name === name));
     items.push({
       id: Date.now(),
       name,
-      baseId: currentFurniture.id,  // 'desk' / 'sofa'
+      baseId: currentFurniture.id,
       size,
-      color,
+      color,        // 旧互換（1色）
+      meshColors,   // ★追加（パーツ別）
       createdAt: new Date().toISOString()
     });
+
 
     savePresets(items);
     renderPresetList();
