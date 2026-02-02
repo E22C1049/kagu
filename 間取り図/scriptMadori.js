@@ -5,9 +5,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 let accessToken = null;
 let latestJson = null;
 
-/* =========================
-   Roboflow settings（更新版）
-   ========================= */
 // 3モデル（newscript.js の構成を移植）
 const ROBOFLOW_API = {
   outer: "https://detect.roboflow.com/floor-plan-japan-base-6xuaz/2?api_key=E0aoexJvBDgvE3nb1jkc",
@@ -15,7 +12,7 @@ const ROBOFLOW_API = {
   extra: "https://detect.roboflow.com/floor-plan-japan-2-menv0/1?api_key=E0aoexJvBDgvE3nb1jkc&confidence=0.25"
 };
 
-// UIは変えないので、常に 3モデル合成を使う
+// 常に 3モデル合成を使う
 const ROBOFLOW_MODE = "all";
 
 /* ========== Furniture presets (shared with 家具生成タブ) ========== */
@@ -24,7 +21,8 @@ const FURN_STORAGE_KEY = 'madomake_furniturePresets';
 /* ========== GLB model paths (relative to 間取り図/indexMadori.html) ========== */
 const GLB_PATHS = {
   desk: '../家具生成/机.glb',
-  sofa: '../家具生成/ソファ.glb'
+  sofa: '../家具生成/ソファ.glb',
+  bed: '../家具生成/ベッド.glb'
 };
 
 const gltfLoader = new GLTFLoader();
@@ -92,7 +90,7 @@ function getFurniturePresets() {
   try {
     const data = JSON.parse(raw);
     if (data && Array.isArray(data.items)) return data.items; // {version, items:[...]}
-    if (Array.isArray(data)) return data;                     // 旧形式 [...]
+    if (Array.isArray(data)) return data;
     return [];
   } catch (e) {
     console.error('[MADORI] 家具プリセットのJSONパースに失敗しました', e);
@@ -228,11 +226,45 @@ async function spawnFurnitureFromPreset(preset) {
 
     root.position.set(-center2.x, -bbox2.min.y, -center2.z);
 
+    // --- Color restore ---
+    // If preset.meshColors exists, apply per-mesh colors.
+    // IMPORTANT: clone materials per mesh to avoid "last color wins" due to shared material instances.
+    const meshColors =
+      (preset && typeof preset.meshColors === 'object' && preset.meshColors) ? preset.meshColors : null;
+    let meshIndex = 0;
+
+    const applyColorToMaterial = (mat, colorStrOrHex) => {
+      if (!mat || !('color' in mat)) return;
+      if (typeof colorStrOrHex === 'number') mat.color.setHex(colorStrOrHex);
+      else mat.color.set(colorStrOrHex); // '#rrggbb'
+      mat.needsUpdate = true;
+    };
+
     root.traverse((o) => {
-      if (o.isMesh && o.material && 'color' in o.material) {
-        o.material.color.setHex(colorHex);
-        o.material.needsUpdate = true;
+      if (!o.isMesh) return;
+
+      // Break shared material references (prevents "last applied color affects all parts")
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material = o.material.map((m) => m.clone());
+        else o.material = o.material.clone();
       }
+
+      if (meshColors) {
+        // Key strategy: index + name (works as long as GLB node order/name is stable)
+        const key = `${meshIndex}:${(o.name || '').trim()}`;
+        const c = meshColors[key];
+
+        if (c) {
+          if (Array.isArray(o.material)) o.material.forEach((m) => applyColorToMaterial(m, c));
+          else applyColorToMaterial(o.material, c);
+        }
+      } else if (baseId !== 'bed') {
+        // Backward-compatible: single color (old presets)
+        if (Array.isArray(o.material)) o.material.forEach((m) => applyColorToMaterial(m, colorHex));
+        else applyColorToMaterial(o.material, colorHex);
+      }
+
+      meshIndex++;
     });
 
     root.userData.draggable = true;
@@ -882,7 +914,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   const fill = new THREE.DirectionalLight(0xffffff, 0.6);
   fill.position.set(-60, 50, -40);
   scene.add(fill);
-　//ここから画像テクスチャ
+
   // ===== wall用テクスチャ（1回だけロード）=====
   const texLoader = new THREE.TextureLoader();
   const wallBaseTex = texLoader.load('テクスチャ/kabe.jpeg');   // indexMadori.html と同階層
@@ -939,7 +971,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   doorTex.anisotropy = 8;
 
   // ===== ガラスドア用テクスチャ =====
-  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg'); 
+  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg'); // パスはあなたの構成に合わせて
   glassDoorTex.colorSpace = THREE.SRGBColorSpace;
   glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; // リピートしない（引き伸ばし）
   glassDoorTex.wrapT = THREE.ClampToEdgeWrapping;
@@ -1206,4 +1238,3 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     if (renderer && scene && camera) renderer.render(scene, camera);
   })();
 }
-
