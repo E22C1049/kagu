@@ -317,34 +317,34 @@ function selectObject(obj) {
   if (moveDeleteBtn) moveDeleteBtn.disabled = !selectedObject;
 }
 
-/* =========================
-   Raycast / Drag
-   ========================= */
 function updatePointerFromEvent(event) {
   if (!renderer) return;
-  if (!threeContainerRect) {
-    const container = document.getElementById('three-container');
-    threeContainerRect = container.getBoundingClientRect();
-  }
-  const x = ((event.clientX - threeContainerRect.left) / threeContainerRect.width) * 2 - 1;
-  const y = -((event.clientY - threeContainerRect.top) / threeContainerRect.height) * 2 + 1;
+
+  // ★常に「canvas自身」のrectを取り直す（ズレの根本対策）
+  const rect = renderer.domElement.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   pointer.set(x, y);
 }
 
 function pickObject(event) {
-  if (!raycaster || !camera || !scene) return null;
+  if (!raycaster || !camera) return null;
+
+  // ★ドラッグ対象だけにRaycast（床・壁に吸われない）
+  if (!draggableObjects || draggableObjects.length === 0) return null;
+
   updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
 
-  const hits = raycaster.intersectObjects(scene.children, true);
+  const hits = raycaster.intersectObjects(draggableObjects, true);
   if (!hits.length) return null;
 
   for (const hit of hits) {
     let obj = hit.object;
     while (obj) {
-      if (obj.userData && obj.userData.draggable) {
-        return obj;
-      }
+      if (obj.userData && obj.userData.draggable) return obj;
       obj = obj.parent;
     }
   }
@@ -352,31 +352,53 @@ function pickObject(event) {
 }
 
 function onDoubleClick(event) {
+  event.preventDefault();
   const obj = pickObject(event);
   if (obj) selectObject(obj);
   else selectObject(null);
 }
 
 function onPointerDown(event) {
-  const obj = pickObject(event);
-  if (obj && obj === selectedObject) {
-    isDragging = true;
-    updatePointerFromEvent(event);
-    raycaster.setFromCamera(pointer, camera);
+  // 左ボタンのみ（右クリック等はOrbitControlsに任せる）
+  if (event.button !== 0) return;
 
-    dragPlane.set(new THREE.Vector3(0, 1, 0), -selectedObject.position.y);
-    if (raycaster.ray.intersectPlane(dragPlane, dragIntersectPoint)) {
-      dragOffset.subVectors(selectedObject.position, dragIntersectPoint);
-    }
-    if (controls) controls.enabled = false;
-    if (placeStatusEl) placeStatusEl.textContent = 'ドラッグ中…';
+  const obj = pickObject(event);
+
+  // 「選択済みの家具」を押した時だけドラッグ開始（今のUI仕様に合わせる）
+  if (!obj || obj !== selectedObject) return;
+
+  event.preventDefault();
+
+  isDragging = true;
+
+  // ★ポインタを捕捉：canvas外に出ても move/up を取りこぼさない
+  renderer.domElement.setPointerCapture?.(event.pointerId);
+
+  updatePointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+
+  // ★床（Y一定）上を移動
+  dragPlane.set(new THREE.Vector3(0, 1, 0), -selectedObject.position.y);
+
+  if (raycaster.ray.intersectPlane(dragPlane, dragIntersectPoint)) {
+    dragOffset.subVectors(selectedObject.position, dragIntersectPoint);
+  } else {
+    // 交差しない状況（カメラが水平すぎる等）→ドラッグ開始しない
+    isDragging = false;
+    renderer.domElement.releasePointerCapture?.(event.pointerId);
+    return;
   }
+
+  if (controls) controls.enabled = false;
+  if (placeStatusEl) placeStatusEl.textContent = 'ドラッグ中…';
 }
 
 function onPointerMove(event) {
   if (!isDragging || !selectedObject) return;
+
   updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
+
   if (raycaster.ray.intersectPlane(dragPlane, dragIntersectPoint)) {
     const newPos = new THREE.Vector3().copy(dragIntersectPoint).add(dragOffset);
     selectedObject.position.x = newPos.x;
@@ -384,16 +406,20 @@ function onPointerMove(event) {
   }
 }
 
-function onPointerUp() {
-  if (isDragging) {
-    isDragging = false;
-    if (controls) controls.enabled = true;
-    if (placeStatusEl && selectedObject) {
-      const label = selectedObject.userData?.label || '箱';
-      placeStatusEl.textContent = '選択中：' + label;
-    }
+function onPointerUp(event) {
+  if (!isDragging) return;
+
+  isDragging = false;
+  renderer?.domElement?.releasePointerCapture?.(event.pointerId);
+
+  if (controls) controls.enabled = true;
+
+  if (placeStatusEl && selectedObject) {
+    const label = selectedObject.userData?.label || '箱';
+    placeStatusEl.textContent = '選択中：' + label;
   }
 }
+
 
 /* =========================
    Google Drive ファイル一覧更新
@@ -1231,6 +1257,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   dom.addEventListener('pointerdown', onPointerDown);
   dom.addEventListener('pointermove', onPointerMove);
   dom.addEventListener('pointerup', onPointerUp);
+  dom.addEventListener('pointercancel', onPointerUp);
 
   (function animate() {
     requestAnimationFrame(animate);
