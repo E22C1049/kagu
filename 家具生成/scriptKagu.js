@@ -10,7 +10,8 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 const furnitures = [
   { id: 'desk', label: '机', file: '机.glb' },
   { id: 'sofa', label: 'ソファ', file: 'ソファ.glb' },
-  { id: 'bed', label: 'ベッド', file: 'ベッド.glb' },
+  { id: 'bed', label: 'ベッド', file: 'bed.glb' },
+  { id: 'chair', label: 'イス', file: '椅子.glb' },
 ];
 
 let currentFurniture = null; // ★ 今どの家具（机/ソファ）を編集しているか
@@ -328,9 +329,34 @@ async function applyPresetToEditor(preset) {
     applySize();
   }
 
-  if (preset.color && uiColor && btnApplyColor) {
-    uiColor.value = preset.color;
-    btnApplyColor.click();
+
+  //　meshColors（パーツごとの色）があればそれを適用、なければ単色適用
+  if (preset.meshColors) {
+    // UIの色選択ボックスだけは代表色（保存時の全体色）に合わせておく
+    if (preset.color) uiColor.value = preset.color;
+    nodes.forEach((n, i) => {
+      // 保存時と同じキー生成ルール: "index:name"
+      const key = `${i}:${(n.name || '').trim()}`;
+      const savedColor = preset.meshColors[key];
+      if (savedColor) {
+        const m = stdMat(n);
+        if (m) {
+          m.color.set(savedColor);
+          m.needsUpdate = true;
+        }
+        // 初期状態(リセット用)の更新
+        if (initialState[n.uuid]) {
+          initialState[n.uuid].color = m.color.getHex();
+        }
+      }
+    });
+  }
+  // 古いデータやmeshColorsがない場合は従来どおり単色適用
+  else if (preset.color && uiColor && btnApplyColor) {
+    if (preset.color && uiColor && btnApplyColor) {
+      uiColor.value = preset.color;
+      btnApplyColor.click();
+    }
   }
 }
 
@@ -655,10 +681,9 @@ if (btnSavePreset) {
     nodes.forEach((n, i) => {
       const m = stdMat(n);
       if (!m || !m.color) return;
-      const key = `${i}:${(n.name || '').trim()}`;   // ← 復元用キー
+      const key = `${i}:${(n.name || '').trim()}`; // 復元用キー
       meshColors[key] = `#${m.color.getHexString()}`;
     });
-
 
     let items = loadPresets();
     // 同じ baseId + name があれば上書き
@@ -666,13 +691,12 @@ if (btnSavePreset) {
     items.push({
       id: Date.now(),
       name,
-      baseId: currentFurniture.id,
+      baseId: currentFurniture.id,  // 'desk' / 'sofa'
       size,
-      color,        // 旧互換（1色）
-      meshColors,   // ★追加（パーツ別）
+      color, //単色
+      meshColors, // パーツ別
       createdAt: new Date().toISOString()
     });
-
 
     savePresets(items);
     renderPresetList();
