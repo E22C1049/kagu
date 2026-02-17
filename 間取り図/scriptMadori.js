@@ -8,25 +8,23 @@ let latestJson = null;
 /* =========================
    Roboflow settings
    ========================= */
-// 3モデル（newscript.js の構成を移植）
 const ROBOFLOW_API = {
   outer: "https://detect.roboflow.com/floor-plan-japan-base-6xuaz/2?api_key=E0aoexJvBDgvE3nb1jkc",
   inner: "https://detect.roboflow.com/floor-plan-japan/7?api_key=E0aoexJvBDgvE3nb1jkc",
   extra: "https://detect.roboflow.com/floor-plan-japan-2-menv0/1?api_key=E0aoexJvBDgvE3nb1jkc&confidence=0.25"
 };
 
-// 常に 3モデル合成を使う
 const ROBOFLOW_MODE = "all";
 
-/* ========== Furniture presets (shared with 家具生成タブ) ========== */
+/* ========== Furniture presets ========== */
 const FURN_STORAGE_KEY = 'madomake_furniturePresets';
 
-/* ========== GLB model paths (relative to 間取り図/indexMadori.html) ========== */
+/* ========== GLB model paths ========== */
 const GLB_PATHS = {
-  desk: '../家具生成/机.glb',
-  sofa: '../家具生成/ソファ.glb',
-  bed: '../家具生成/bed.glb',
-  chair: '../家具生成/椅子.glb'
+  desk: '../Blender家具/家具/机.glb',
+  sofa: '../Blender家具/家具/ソファ.glb',
+  bed: '../Blender家具/家具/bed.glb',
+  chair: '../Blender家具/家具/椅子.glb'
 };
 
 // プリセット
@@ -34,7 +32,7 @@ const DEFAULT_PRESETS = [
   { baseId: 'desk', name: '机', size: { x: 1.2, y: 0.7, z: 0.6 } },
   { baseId: 'chair', name: 'イス', size: { x: 0.5, y: 0.8, z: 0.5 } },
   { baseId: 'sofa', name: 'ソファ', size: { x: 1.8, y: 0.8, z: 0.8 } },
-  { baseId: 'bed', name: 'ベッド', size: { x: 1.2, y: 0.5, z: 2.0 } },
+  { baseId: 'bed', name: 'ベッド', size: { x: 1.95, y: 0.8, z: 0.97 } },
 ];
 
 const gltfLoader = new GLTFLoader();
@@ -56,11 +54,12 @@ let selectedObject = null;
 let isDragging = false;
 let threeContainerRect = null;
 
-// 回転機能用変数
-let rotationGizmo = null;   // 回転用の円弧オブジェクト
-let isRotating = false;     // 回転操作中かどうかのフラグ
-let startMouseAngle = 0;    // 回転開始時のマウス角度
-let startObjectRotation = 0;// 回転開始時の家具角度
+// ★ギズモ関連
+let rotationGizmo = null;   // 回転用（黄色い円弧）
+let dimensionGizmo = null;  // 寸法用（赤緑青の矢印）
+let isRotating = false;
+let startMouseAngle = 0;
+let startObjectRotation = 0;
 
 /* ========== UI refs ========== */
 let placeStatusEl = null;
@@ -72,12 +71,18 @@ let boxDEl = null;
 let fileSelectEl = null;
 let libraryListEl = null;
 
-/* Unit scale for boxes (1 = 1m 相当) */
+// ★追加: サイズ調整用UI
+let sizeInputW = null;
+let sizeInputH = null;
+let sizeInputD = null;
+let sizeTargetName = null;
+let applySizeBtn = null;
+
 const UNIT_SCALE = 1.0;
 
 /* =========================
-Google Drive 認証 
-========================= */
+   Google Drive 認証 
+   ========================= */
 function handleCredentialResponse(_) {
   console.log('Googleログイン成功'); requestAccessToken();
 }
@@ -93,24 +98,22 @@ function requestAccessToken() {
 }
 
 /* =========================
-   localStorage: 家具プリセット取得
+   localStorage
    ========================= */
 function getFurniturePresets() {
   const raw = localStorage.getItem(FURN_STORAGE_KEY);
-  console.log('[MADORI] localStorage key =', FURN_STORAGE_KEY, 'raw =', raw);
   if (!raw) return [];
   try {
     const data = JSON.parse(raw);
-    if (data && Array.isArray(data.items)) return data.items; // {version, items:[...]}
-    if (Array.isArray(data)) return data;                     // 旧形式 [...]
+    if (data && Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data)) return data;
     return [];
   } catch (e) {
-    console.error('[MADORI] 家具プリセットのJSONパースに失敗しました', e);
+    console.error('[MADORI] JSON parse failed', e);
     return [];
   }
 }
 
-/* 家具ライブラリの描画 */
 function renderFurnitureLibrary() {
   if (!libraryListEl) return;
   const presets = getFurniturePresets();
@@ -134,17 +137,14 @@ function renderFurnitureLibrary() {
   });
 }
 
-/* プリセット（標準家具）の描画 */
 function renderDefaultPresets() {
   const container = document.getElementById('defaultList');
   if (!container) return;
-
   container.innerHTML = '';
   DEFAULT_PRESETS.forEach((preset) => {
     const btn = document.createElement('button');
     btn.className = 'libItemBtn';
     btn.textContent = preset.name;
-
     btn.addEventListener('click', () => {
       spawnFurnitureFromPreset(preset);
     });
@@ -152,7 +152,6 @@ function renderDefaultPresets() {
   });
 }
 
-/* プリセットから色を決定（ユーザー指定 > 種類別デフォルト） */
 function colorFromPreset(preset) {
   const baseId = preset.baseId || 'generic';
   const DEFAULT_KAGU_COLOR = '#8a5a2b';
@@ -171,18 +170,14 @@ function colorFromPreset(preset) {
   return typeColors[baseId] || 0x888888;
 }
 
-/* プリセットの外寸を「m」に統一して返す */
 function presetSizeToMeters(preset) {
   const size = (preset && preset.size) ? preset.size : {};
   const rx = Number(size.x);
   const ry = Number(size.y);
   const rz = Number(size.z);
-
-  const unitRaw =
-    (preset && (preset.sizeUnit || preset.unit || preset.units || preset.lengthUnit)) || '';
+  const unitRaw = (preset && (preset.sizeUnit || preset.unit || preset.units || preset.lengthUnit)) || '';
   const unit = String(unitRaw).toLowerCase().trim();
-
-  let factor = 1; // 乗算して m にする係数
+  let factor = 1;
   if (unit === 'cm') factor = 0.01;
   else if (unit === 'm' || unit === 'meter' || unit === 'meters') factor = 1;
   else {
@@ -190,12 +185,10 @@ function presetSizeToMeters(preset) {
     const maxv = candidates.length ? Math.max(...candidates) : 1;
     factor = maxv > 10 ? 0.01 : 1;
   }
-
   const fallbackRaw = (factor === 0.01) ? 100 : 1;
   const xRaw = Number.isFinite(rx) ? rx : fallbackRaw;
   const yRaw = Number.isFinite(ry) ? ry : fallbackRaw;
   const zRaw = Number.isFinite(rz) ? rz : fallbackRaw;
-
   return {
     x: Math.max(0.1, xRaw * factor),
     y: Math.max(0.1, yRaw * factor),
@@ -203,15 +196,12 @@ function presetSizeToMeters(preset) {
   };
 }
 
-/* プリセットから本物の家具(GLB)を生成 */
 async function spawnFurnitureFromPreset(preset) {
   if (!scene) {
     alert('先に「分析（Roboflow）」で3D表示を生成してください。');
     return;
   }
-
   const target = presetSizeToMeters(preset);
-
   const baseId = preset.baseId || 'generic';
   const name = preset.name || baseId;
   const modelPath = GLB_PATHS[baseId];
@@ -256,9 +246,7 @@ async function spawnFurnitureFromPreset(preset) {
 
     root.position.set(-center2.x, -bbox2.min.y, -center2.z);
 
-    // --- Color restore ---
-    const meshColors =
-      (preset && typeof preset.meshColors === 'object' && preset.meshColors) ? preset.meshColors : null;
+    const meshColors = (preset && typeof preset.meshColors === 'object' && preset.meshColors) ? preset.meshColors : null;
     let meshIndex = 0;
     const applyColorToMaterial = (mat, colorStrOrHex) => {
       if (!mat || !('color' in mat)) return;
@@ -269,13 +257,10 @@ async function spawnFurnitureFromPreset(preset) {
 
     root.traverse((o) => {
       if (!o.isMesh) return;
-
-      // Break shared material references
       if (o.material) {
         if (Array.isArray(o.material)) o.material = o.material.map((m) => m.clone());
         else o.material = o.material.clone();
       }
-
       if (meshColors) {
         const key = `${meshIndex}:${(o.name || '').trim()}`;
         const c = meshColors[key];
@@ -307,7 +292,6 @@ async function spawnFurnitureFromPreset(preset) {
   }
 }
 
-/* 手動で出す箱 */
 function addBoxAtCenter(w, h, d, color = 0x2194ce, meta = {}) {
   if (!scene) {
     alert('先に「分析（Roboflow）」で3D表示を生成してください。');
@@ -316,55 +300,45 @@ function addBoxAtCenter(w, h, d, color = 0x2194ce, meta = {}) {
   const geo = new THREE.BoxGeometry(w * UNIT_SCALE, h * UNIT_SCALE, d * UNIT_SCALE);
   const mat = new THREE.MeshLambertMaterial({ color });
   const mesh = new THREE.Mesh(geo, mat);
-
   mesh.position.set(0, (h * UNIT_SCALE) / 2, 0);
   mesh.userData.draggable = true;
   mesh.userData.isObstacle = true;
   mesh.userData.baseId = meta.baseId || 'generic';
   mesh.userData.label = meta.name || '箱';
-
   scene.add(mesh);
   draggableObjects.push(mesh);
   selectObject(mesh);
 }
 
 /* =========================
-   回転　円弧+矢印
+   ★回転ギズモ（黄色に変更）
    ========================= */
 function createRotationGizmo(targetObj) {
   if (!targetObj) return null;
 
-  // 半径
   const bbox = new THREE.Box3().setFromObject(targetObj);
   const size = new THREE.Vector3();
   bbox.getSize(size);
-  const radius = Math.max(size.x, size.z) * 0.7; // 家具より一回り大きく
+  const radius = Math.max(size.x, size.z) * 0.7;
 
-  // 設定
-  const tube = 0.05;          // 円弧の太さ（半径方向の幅の半分）
-  const arrowLen = tube * 6;  // 矢印の長さ
-  const arrowRad = tube * 2.5; // 矢印の太さ（底面の半径）
+  const tube = 0.05;
+  const arrowLen = tube * 6;
+  const arrowRad = tube * 2.5;
 
   const group = new THREE.Group();
   group.userData.isGizmo = true;
 
-  // 3. 角度設定 (4時〜8時 = 手前側)
-  // Three.jsのRingGeometryは 3時(0度) スタートで反時計回り
-  // 4時 = 330度 (-30度) 
-  // 8時 = 210度 (-150度)
-  // ここでは RingGeometry の仕様に合わせて 210度〜330度 の範囲で描画
-  const startRad = 210 * (Math.PI / 180); // 7π/6
-  const endRad = 330 * (Math.PI / 180);   // 11π/6
-  const lenRad = endRad - startRad;       // 120度 (2π/3)
+  // 手前側 (4時〜8時)
+  const startRad = 210 * (Math.PI / 180);
+  const endRad = 330 * (Math.PI / 180);
+  const lenRad = endRad - startRad;
 
-  // 円弧
+  // 1. 円弧 (黄色)
   const arcGeo = new THREE.RingGeometry(radius - tube, radius + tube, 64, 1, startRad, lenRad);
-  // X軸で-90度回転させて床に寝かせる (頂点座標の Y が -Z に、Z が Y になる)
-  // これにより、Ringの「3時」がワールドの「+X」、「12時」が「-Z(奥)」に
   arcGeo.rotateX(-Math.PI / 2);
 
   const mat = new THREE.MeshBasicMaterial({
-    color: 0x1e90ff,
+    color: 0xffff00, // ★黄色に変更
     side: THREE.DoubleSide,
     depthTest: false,
     transparent: true,
@@ -375,15 +349,15 @@ function createRotationGizmo(targetObj) {
   arcMesh.userData.isGizmoPart = true;
   group.add(arcMesh);
 
-  // 判定用透明リング (当たり判定拡大) ---
+  // 2. 判定用透明リング
   const hitTube = 0.2;
   const hitGeo = new THREE.RingGeometry(radius - hitTube, radius + hitTube, 32, 1, startRad, lenRad);
   hitGeo.rotateX(-Math.PI / 2);
   const hitMat = new THREE.MeshBasicMaterial({
     color: 0xff0000,
-    visible: true,      // Raycaster用
+    visible: true,
     transparent: true,
-    opacity: 0,         // 透明
+    opacity: 0,
     depthWrite: false,
     side: THREE.DoubleSide
   });
@@ -391,55 +365,155 @@ function createRotationGizmo(targetObj) {
   hitMesh.userData.isGizmoPart = true;
   group.add(hitMesh);
 
-  // 矢印
+  // 3. 矢印
   function createArrow(angleRad, isClockwise) {
-    // 1. 円弧の端点の座標 (ワールド座標系: Y=0平面)
-    // RingGeometry(x, y) -> rotateX(-90) -> (x, 0, -y)
-    // x = R * cos(theta), z = - R * sin(theta)
     const px = radius * Math.cos(angleRad);
     const pz = -radius * Math.sin(angleRad);
     const pos = new THREE.Vector3(px, 0, pz);
 
-    // 2. 接線ベクトル (矢印の向き)
-    // 円周の接線は (dx/dθ, dz/dθ) = (-R sin, -R cos)
-    // 反時計回り(CCW)方向ベクトル
     const tanX = -radius * Math.sin(angleRad);
     const tanZ = -radius * Math.cos(angleRad);
     let dir = new THREE.Vector3(tanX, 0, tanZ).normalize();
-
-    // 時計回りの場合は逆向きに
-    if (isClockwise) {
-      dir.negate();
-    }
+    if (isClockwise) dir.negate();
 
     const coneGeo = new THREE.ConeGeometry(arrowRad, arrowLen, 16);
-    coneGeo.rotateX(-Math.PI / 2); // 先端を -Z (奥) 、底面を +Z (手前) 
+    coneGeo.rotateX(-Math.PI / 2);
 
     const arrow = new THREE.Mesh(coneGeo, mat);
     const centerPos = pos.clone().add(dir.clone().multiplyScalar(arrowLen / 2));
     arrow.position.copy(centerPos);
+
     const target = centerPos.clone().add(dir);
     arrow.lookAt(target);
     arrow.userData.isGizmoPart = true;
     return arrow;
   }
 
-  // 左端 (Start: 210度) -> 時計回り(CW)向きの矢印
-  const arrowL = createArrow(startRad, true);
-  group.add(arrowL);
+  group.add(createArrow(startRad, true));
+  group.add(createArrow(endRad, false));
 
-  // 右端 (End: 330度) -> 反時計回り(CCW)向きの矢印
-  const arrowR = createArrow(endRad, false);
-  group.add(arrowR);
+  return group;
+}
+
+/* =========================
+   ★寸法矢印ギズモ（赤・緑・青）
+   ========================= */
+function makeDimArrowMesh(color, axis, length) {
+  const guideThick = 0.02; // 太さ
+  const headH = 0.12;
+  const headR = 0.04;
+
+  const g = new THREE.Group();
+
+  // シャフト（棒）
+  // lengthは全体の長さ。両端にheadHがある。
+  const shaftLen = Math.max(0.001, length - headH * 2);
+
+  let shaftGeo;
+  if (axis === 'x') shaftGeo = new THREE.BoxGeometry(shaftLen, guideThick, guideThick);
+  else if (axis === 'y') shaftGeo = new THREE.BoxGeometry(guideThick, shaftLen, guideThick);
+  else shaftGeo = new THREE.BoxGeometry(guideThick, guideThick, shaftLen);
+
+  const mat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 });
+  const shaft = new THREE.Mesh(shaftGeo, mat);
+  g.add(shaft);
+
+  // 矢印の頭（コーン）
+  const headGeo = new THREE.ConeGeometry(headR, headH, 16);
+  const head1 = new THREE.Mesh(headGeo, mat);
+  const head2 = new THREE.Mesh(headGeo, mat);
+
+  // 向き調整
+  if (axis === 'x') {
+    head1.rotation.z = -Math.PI / 2; // +X向き
+    head2.rotation.z = Math.PI / 2;  // -X向き
+    head1.position.set(length / 2, 0, 0);
+    head2.position.set(-length / 2, 0, 0);
+  } else if (axis === 'y') {
+    head1.position.set(0, length / 2, 0);
+    head2.rotation.x = Math.PI;
+    head2.position.set(0, -length / 2, 0);
+  } else { // z
+    head1.rotation.x = Math.PI / 2;
+    head1.position.set(0, 0, length / 2);
+    head2.rotation.x = -Math.PI / 2;
+    head2.position.set(0, 0, -length / 2);
+  }
+
+  g.add(head1);
+  g.add(head2);
+
+  return g;
+}
+
+function createDimensionGizmo(targetObj) {
+  if (!targetObj) return null;
+
+  // 1. ローカル座標系でのバウンディングボックスを取得
+  const clone = targetObj.clone();
+
+  // ★重要: 位置と回転をリセットして、純粋なサイズだけを計算できるようにする
+  clone.position.set(0, 0, 0);
+  clone.rotation.set(0, 0, 0);
+
+  clone.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(clone);
+
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  const group = new THREE.Group();
+  group.userData.isGizmo = true;
+
+  const offset = 0.1;
+  const outer = offset * 2;
+
+  // --- X軸矢印 (赤) ---
+  const arrowX = makeDimArrowMesh('#e74a3b', 'x', size.x);
+  arrowX.position.set(
+    center.x,
+    box.min.y - offset,
+    box.max.z + outer
+  );
+  group.add(arrowX);
+
+  // --- Y軸矢印 (緑) ---
+  const arrowY = makeDimArrowMesh('#2ECC71', 'y', size.y);
+  arrowY.position.set(
+    box.max.x + outer,
+    center.y,
+    box.max.z + outer
+  );
+  group.add(arrowY);
+
+  // --- Z軸矢印 (青) ---
+  const arrowZ = makeDimArrowMesh('#3498db', 'z', size.z);
+  arrowZ.position.set(
+    box.max.x + outer,
+    box.min.y - offset,
+    center.z
+  );
+  group.add(arrowZ);
 
   return group;
 }
 
 function updateGizmoPosition() {
-  if (rotationGizmo && selectedObject) {
-    rotationGizmo.position.copy(selectedObject.position);
-    rotationGizmo.position.y = 0.02;
-    rotationGizmo.rotation.y = selectedObject.rotation.y;
+  if (selectedObject) {
+    // 1. 回転ギズモの追従
+    if (rotationGizmo) {
+      rotationGizmo.position.copy(selectedObject.position);
+      rotationGizmo.position.y = 0.02; // 床すれすれ
+      rotationGizmo.rotation.y = selectedObject.rotation.y;
+    }
+    // 2. 寸法ギズモの追従
+    if (dimensionGizmo) {
+      dimensionGizmo.position.copy(selectedObject.position);
+      // 寸法ギズモもオブジェクトと一緒に回転させる（ローカル軸に合わせるため）
+      dimensionGizmo.rotation.y = selectedObject.rotation.y;
+    }
   }
 }
 
@@ -447,27 +521,110 @@ function updateGizmoPosition() {
 function selectObject(obj) {
   selectedObject = obj || null;
 
+  // 既存ギズモ削除
   if (rotationGizmo) {
     scene.remove(rotationGizmo);
     rotationGizmo = null;
+  }
+  if (dimensionGizmo) {
+    scene.remove(dimensionGizmo);
+    dimensionGizmo = null;
   }
 
   if (placeStatusEl) {
     if (!selectedObject) {
       placeStatusEl.textContent = '未選択';
+
+      // ★追加: 未選択時のUIリセット
+      if (sizeTargetName) sizeTargetName.textContent = '未選択';
+      if (sizeInputW) sizeInputW.value = '';
+      if (sizeInputH) sizeInputH.value = '';
+      if (sizeInputD) sizeInputD.value = '';
+
     } else {
       const label = selectedObject.userData?.label || '箱';
       placeStatusEl.textContent = '選択中：' + label;
 
+      // ★ギズモ生成
       rotationGizmo = createRotationGizmo(selectedObject);
-      if (rotationGizmo) {
-        scene.add(rotationGizmo);
-        updateGizmoPosition();
-      }
+      dimensionGizmo = createDimensionGizmo(selectedObject);
+
+      if (rotationGizmo) scene.add(rotationGizmo);
+      if (dimensionGizmo) scene.add(dimensionGizmo);
+
+      updateGizmoPosition();
+
+      // ★追加: サイズ調整UIへの反映
+      if (sizeTargetName) sizeTargetName.textContent = label;
+
+      // 回転の影響を除外して正確なサイズを取得
+      const rotY = selectedObject.rotation.y;
+      selectedObject.rotation.y = 0;
+      selectedObject.updateMatrixWorld();
+
+      const box = new THREE.Box3().setFromObject(selectedObject);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+
+      // 回転を戻す
+      selectedObject.rotation.y = rotY;
+      selectedObject.updateMatrixWorld();
+
+      // m -> cm に変換して表示 (小数第1位まで)
+      if (sizeInputW) sizeInputW.value = (size.x * 100).toFixed(1);
+      if (sizeInputH) sizeInputH.value = (size.y * 100).toFixed(1);
+      if (sizeInputD) sizeInputD.value = (size.z * 100).toFixed(1);
     }
   }
   if (moveDoneBtn) moveDoneBtn.disabled = !selectedObject;
   if (moveDeleteBtn) moveDeleteBtn.disabled = !selectedObject;
+}
+
+/* ★追加: サイズ変更の適用処理（底面固定） */
+function applyObjectSize() {
+  if (!selectedObject) return;
+
+  // 入力値 (cm) を取得し m に変換
+  const wCm = parseFloat(sizeInputW.value);
+  const hCm = parseFloat(sizeInputH.value);
+  const dCm = parseFloat(sizeInputD.value);
+
+  if (isNaN(wCm) || isNaN(hCm) || isNaN(dCm) || wCm <= 0 || hCm <= 0 || dCm <= 0) {
+    alert('有効な数値を入力してください');
+    return;
+  }
+
+  const targetW = wCm / 100;
+  const targetH = hCm / 100;
+  const targetD = dCm / 100;
+
+  // 現在のサイズを取得（回転リセット状態で計測）
+  const rotY = selectedObject.rotation.y;
+  selectedObject.rotation.y = 0;
+  selectedObject.updateMatrixWorld();
+
+  const currentBox = new THREE.Box3().setFromObject(selectedObject);
+  const currentSize = new THREE.Vector3();
+  currentBox.getSize(currentSize);
+
+  // 比率計算してスケール適用
+  if (currentSize.x > 0) selectedObject.scale.x *= (targetW / currentSize.x);
+  if (currentSize.y > 0) selectedObject.scale.y *= (targetH / currentSize.y);
+  if (currentSize.z > 0) selectedObject.scale.z *= (targetD / currentSize.z);
+
+  // 回転を戻す
+  selectedObject.rotation.y = rotY;
+  selectedObject.updateMatrixWorld();
+
+  // 底面位置の補正（上に伸びるようにする）
+  // スケール変更後のバウンディングボックスを再計算
+  const newBox = new THREE.Box3().setFromObject(selectedObject);
+
+  // 家具が浮いたり沈んだりしている分（newBox.min.y）を引いて、Y=0に接地させる
+  selectedObject.position.y -= newBox.min.y;
+
+  // ギズモと数値を更新
+  selectObject(selectedObject);
 }
 
 /* =========================
@@ -487,12 +644,11 @@ function updatePointerFromEvent(event) {
   pointer.set(x, y);
 }
 
-// ギズモをクリックしたか判定
+// ギズモをクリックしたか判定 (回転ギズモのみ判定対象)
 function pickGizmo(event) {
   if (!rotationGizmo || !raycaster || !camera) return false;
   updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
-  // trueを指定して子要素（透明なヒットエリア含む）も判定
   const hits = raycaster.intersectObject(rotationGizmo, true);
   return hits.length > 0;
 }
@@ -507,6 +663,7 @@ function pickObject(event) {
   if (!hits.length) return null;
 
   for (const hit of hits) {
+    // ギズモは除外
     if (hit.object.userData.isGizmo || hit.object.userData.isGizmoPart || hit.object.parent?.userData?.isGizmo) {
       continue;
     }
@@ -533,7 +690,7 @@ function onDoubleClick(event) {
 function onPointerDown(event) {
   if (event.button !== 0) return;
 
-  // 1. 回転判定（透明エリア含めて広範囲でチェック）
+  // 1. 回転判定
   if (selectedObject && rotationGizmo && pickGizmo(event)) {
     isRotating = true;
     isDragging = false;
@@ -826,6 +983,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const filenameInput = document.getElementById('filenameInput');
   fileSelectEl = document.getElementById('fileSelect');
 
+  // ★追加: 保存・読み込み用の要素取得
+  const saveLoadHeader = document.getElementById('save-load-header');
+  const saveLoadContainer = document.getElementById('save-load-container');
+
+  // ★追加: サイズ調整UIの取得
+  const sizeHeader = document.getElementById('size-header');
+  const sizeContainer = document.getElementById('size-container');
+  sizeInputW = document.getElementById('sizeInputW');
+  sizeInputH = document.getElementById('sizeInputH');
+  sizeInputD = document.getElementById('sizeInputD');
+  sizeTargetName = document.getElementById('sizeTargetName');
+  applySizeBtn = document.getElementById('applySizeBtn');
+
   boxWEl = document.getElementById('boxW');
   boxHEl = document.getElementById('boxH');
   boxDEl = document.getElementById('boxD');
@@ -841,8 +1011,33 @@ document.addEventListener('DOMContentLoaded', () => {
     else { openContainer(openEl); closeContainer(closeEl); }
   }
 
+  // ★追加: 単独で開閉する関数
+  function toggleSelf(el) {
+    if (el.classList.contains('expanded')) {
+      closeContainer(el);
+    } else {
+      openContainer(el);
+    }
+  }
+
   uploadHeader?.addEventListener('click', () => toggleExclusive(uploadContainer, resultContainer));
   resultHeader?.addEventListener('click', () => toggleExclusive(resultContainer, uploadContainer));
+
+  // ★追加: 保存・読み込みヘッダーのクリックイベント
+  saveLoadHeader?.addEventListener('click', () => toggleSelf(saveLoadContainer));
+
+  // ★追加: サイズ調整カードの開閉
+  sizeHeader?.addEventListener('click', () => toggleSelf(sizeContainer));
+
+  // ★追加: サイズ適用ボタンのイベント
+  applySizeBtn?.addEventListener('click', applyObjectSize);
+
+  // ★追加: エンターキーでも適用できるようにする
+  [sizeInputW, sizeInputH, sizeInputD].forEach(input => {
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') applyObjectSize();
+    });
+  });
 
   let selectedFile = null;
   document.getElementById('imageInput').addEventListener('change', (e) => {
@@ -955,6 +1150,7 @@ document.addEventListener('DOMContentLoaded', () => {
     moveDeleteBtn.addEventListener('click', () => {
       if (!selectedObject || !scene) return;
       if (rotationGizmo) { scene.remove(rotationGizmo); rotationGizmo = null; }
+      if (dimensionGizmo) { scene.remove(dimensionGizmo); dimensionGizmo = null; }
       scene.remove(selectedObject);
       draggableObjects = draggableObjects.filter((o) => o !== selectedObject);
       selectObject(null);
@@ -1128,6 +1324,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   draggableObjects = [];
   selectedObject = null;
   rotationGizmo = null;
+  dimensionGizmo = null;
   raycaster = new THREE.Raycaster();
   pointer = new THREE.Vector2();
   dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
