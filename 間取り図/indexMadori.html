@@ -48,11 +48,11 @@
         </div>
 
         <div class="card">
-          <div class="card__head">
+          <div class="card__head clickable" id="save-load-header">
             <h2 class="card__title">保存・読み込み</h2>
             <p class="card__desc">Google Drive に保存／読み込み（ログインが必要）。</p>
           </div>
-          <div class="card__body stack">
+          <div class="card__body stack expanded" id="save-load-container">
             <div id="g_id_onload"
               data-client_id="479474446026-kej6f40kvfm6dsuvfeo5d4fm87c6god4.apps.googleusercontent.com"
               data-callback="handleCredentialResponse" data-auto_prompt="false"></div>
@@ -82,7 +82,45 @@
           </div>
         </div>
 
-        <!-- 分析結果JSON（UIは非表示。JSの書き込み先としてだけ残す） -->
+        <div class="card">
+          <div class="card__head clickable" id="size-header">
+            <h2 class="card__title">サイズ調整 (cm)</h2>
+            <p class="card__desc">選択中の家具のサイズを変更します。</p>
+          </div>
+          <div class="card__body stack expanded" id="size-container">
+            <div class="subTitle" id="sizeTargetName">未選択</div>
+
+            <div style="display: flex; gap: 16px;">
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <label style="font-size:12px; font-weight:bold; color:#e74a3b; width:36px;">幅(X)</label>
+                  <input id="sizeInputW" class="input" type="number" step="1" placeholder="-"
+                    style="width:80px; padding:6px;">
+                </div>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <label style="font-size:12px; font-weight:bold; color:#3498db; width:36px;">奥(Z)</label>
+                  <input id="sizeInputD" class="input" type="number" step="1" placeholder="-"
+                    style="width:80px; padding:6px;">
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <label style="font-size:12px; font-weight:bold; color:#2ECC71; width:36px;">高(Y)</label>
+                  <input id="sizeInputH" class="input" type="number" step="1" placeholder="-"
+                    style="width:80px; padding:6px;">
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <button id="applySizeBtn" class="btn btnPrimary" type="button" style="width:100%;">合わせる</button>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- 分析結果JSON -->
         <div id="result-header" style="display:none;"></div>
         <div id="result-container" style="display:none;" class="collapsed">
           <pre id="result"></pre>
