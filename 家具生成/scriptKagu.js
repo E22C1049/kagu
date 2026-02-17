@@ -8,13 +8,13 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 
 /* 家具定義（増やす場合はここに追記） */
 const furnitures = [
-  { id: 'desk', label: '机', file: '机.glb' },
-  { id: 'sofa', label: 'ソファ', file: 'ソファ.glb' },
-  { id: 'bed', label: 'ベッド', file: 'bed.glb' },
-  { id: 'chair', label: 'イス', file: '椅子.glb' },
+  { id: 'desk', label: '机', file: 'Blender家具/机.glb' },
+  { id: 'sofa', label: 'ソファ', file: 'Blender家具/ソファ.glb' },
+  { id: 'bed', label: 'ベッド', file: 'Blender家具/bed.glb' },
+  { id: 'chair', label: 'イス', file: 'Blender家具/椅子.glb' },
 ];
 
-let currentFurniture = null; // ★ 今どの家具（机/ソファ）を編集しているか
+let currentFurniture = null; // 今どの家具（机/ソファ）を編集しているか
 
 
 // 家具プリセット保存用キー（間取り図側と共有）
