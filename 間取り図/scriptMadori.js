@@ -1245,7 +1245,9 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg');
   glassDoorTex.colorSpace = THREE.SRGBColorSpace; glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; glassDoorTex.wrapT = THREE.ClampToEdgeWrapping; glassDoorTex.anisotropy = 8;
 
+  // ★修正: 固定スケール (Plan A)
   const scale = 0.027;
+
   const baseObj = (predictions || []).find(p => p.class === "base");
   let floorW, floorH, floorX, floorZ;
   if (baseObj) {
