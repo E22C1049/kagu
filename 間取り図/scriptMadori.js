@@ -21,10 +21,10 @@ const FURN_STORAGE_KEY = 'madomake_furniturePresets';
 
 /* ========== GLB model paths ========== */
 const GLB_PATHS = {
-  desk: '../Blender家具/家具/机.glb',
-  sofa: '../Blender家具/家具/ソファ.glb',
-  bed: '../Blender家具/家具/bed.glb',
-  chair: '../Blender家具/家具/椅子.glb'
+  desk: '../家具生成/Blender家具/机.glb',
+  sofa: '../家具生成/Blender家具/ソファ.glb',
+  bed: '../家具生成/Blender家具/bed.glb',
+  chair: '../家具生成/Blender家具/椅子.glb'
 };
 
 // プリセット
