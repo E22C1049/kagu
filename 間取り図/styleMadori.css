@@ -433,3 +433,10 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+
+#defaultList {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  /* 既存の .libraryList の gap は継承されないため明示 */
+}
