@@ -22,17 +22,21 @@ const FURN_STORAGE_KEY = 'madomake_furniturePresets';
 /* ========== GLB model paths ========== */
 const GLB_PATHS = {
   desk: '../家具生成/Blender家具/机.glb',
-  sofa: '../家具生成/Blender家具/ソファ.glb',
+  //sofa: '../家具生成/Blender家具/ソファ.glb',
   bed: '../家具生成/Blender家具/bed.glb',
-  chair: '../家具生成/Blender家具/椅子.glb'
+  chair: '../家具生成/Blender家具/椅子.glb',
+  closet: '../家具生成/Blender家具/キャビネット.glb',
+  lowtable: '../家具生成/Blender家具/ちゃぶ台.glb'
 };
 
-// プリセット
+// プリセット sizeはm
 const DEFAULT_PRESETS = [
   { baseId: 'desk', name: '机', size: { x: 1.2, y: 0.7, z: 0.6 } },
   { baseId: 'chair', name: 'イス', size: { x: 0.5, y: 0.8, z: 0.5 } },
-  { baseId: 'sofa', name: 'ソファ', size: { x: 1.8, y: 0.8, z: 0.8 } },
+  //{ baseId: 'sofa', name: 'ソファ', size: { x: 1.8, y: 0.8, z: 0.8 } },
   { baseId: 'bed', name: 'ベッド', size: { x: 1.95, y: 0.8, z: 0.97 } },
+  { baseId: 'closet', name: 'キャビネット', size: { x: 0.47, y: 0.64, z: 0.84 } },
+  { baseId: 'lowtable', name: 'ちゃぶだい', size: { x: 0.6, y: 0.2, z: 0.6 } },
 ];
 
 const gltfLoader = new GLTFLoader();
@@ -1241,7 +1245,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg');
   glassDoorTex.colorSpace = THREE.SRGBColorSpace; glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; glassDoorTex.wrapT = THREE.ClampToEdgeWrapping; glassDoorTex.anisotropy = 8;
 
-  const scale = 0.1;
+  const scale = 0.027;
   const baseObj = (predictions || []).find(p => p.class === "base");
   let floorW, floorH, floorX, floorZ;
   if (baseObj) {
