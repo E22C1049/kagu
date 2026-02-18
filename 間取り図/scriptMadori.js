@@ -1242,7 +1242,7 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
   fusumaTex.colorSpace = THREE.SRGBColorSpace; fusumaTex.wrapS = THREE.ClampToEdgeWrapping; fusumaTex.wrapT = THREE.ClampToEdgeWrapping; fusumaTex.anisotropy = 8;
   const doorTex = texLoader.load('テクスチャ/door.jpeg');
   doorTex.colorSpace = THREE.SRGBColorSpace; doorTex.wrapS = THREE.ClampToEdgeWrapping; doorTex.wrapT = THREE.ClampToEdgeWrapping; doorTex.anisotropy = 8;
-  const glassDoorTex = texLoader.load('テクスチャ/glasswindow.jpg');
+  const glassDoorTex = texLoader.load('テクスチャ/glasswindow2.png');
   glassDoorTex.colorSpace = THREE.SRGBColorSpace; glassDoorTex.wrapS = THREE.ClampToEdgeWrapping; glassDoorTex.wrapT = THREE.ClampToEdgeWrapping; glassDoorTex.anisotropy = 8;
 
   // ★修正: 固定スケール (Plan A)
@@ -1353,3 +1353,4 @@ function initSceneWithFloorplan(predictions, imageWidth, imageHeight) {
     if (renderer && scene && camera) renderer.render(scene, camera);
   })();
 }
+
