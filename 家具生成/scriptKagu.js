@@ -12,6 +12,8 @@ const furnitures = [
   { id: 'sofa', label: 'ソファ', file: 'Blender家具/ソファ.glb' },
   { id: 'bed', label: 'ベッド', file: 'Blender家具/bed.glb' },
   { id: 'chair', label: 'イス', file: 'Blender家具/椅子.glb' },
+  { id: 'closet', label: 'キャビネット', file: 'Blender家具/キャビネット.glb' },
+  { id: 'lowtable', label: 'ちゃぶだい', file: 'Blender家具/ちゃぶ台.glb' },
 ];
 
 let currentFurniture = null; // 今どの家具（机/ソファ）を編集しているか
